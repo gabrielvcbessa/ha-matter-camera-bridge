@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+node_modules/
+sidecar/node_modules/
+.DS_Store
+.env
+snapshots/
+relay/
+matter-storage/
+*.log

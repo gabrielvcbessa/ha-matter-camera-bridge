@@ -1,0 +1,8 @@
+.git
+.env
+**/__pycache__
+**/*.pyc
+sidecar/node_modules
+matter-storage
+relay
+snapshots

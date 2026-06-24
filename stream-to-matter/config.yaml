@@ -1,0 +1,46 @@
+name: Stream to Matter Parser
+version: "0.1.32"
+slug: stream_to_matter
+description: RTSP/ONVIF camera to Matter camera bridge with PTZ and WHEP media.
+url: https://github.com/gabrielvcbessa/ha-matter-camera-bridge
+arch:
+  - amd64
+  - aarch64
+startup: application
+boot: auto
+init: false
+timeout: 300
+host_network: true
+webui: http://[HOST]:[PORT:8090]/
+watchdog: http://[HOST]:[PORT:8090]/health
+ports:
+  8080/tcp: 8080
+  8090/tcp: 8090
+  5540/tcp: 5540
+  5540/udp: 5540
+  8889/tcp: 8889
+ports_description:
+  8080/tcp: Bridge REST API
+  8090/tcp: Matter sidecar REST API
+  5540/tcp: Matter operational TCP
+  5540/udp: Matter operational UDP
+  8889/tcp: WHEP media relay
+map:
+  - type: addon_config
+    read_only: false
+options:
+  matter_passcode: ""
+  matter_discriminator: ""
+  matter_port: 5540
+  matter_tcp: false
+  product_name: Stream to Matter Camera Bridge
+  matter_log_level: warn
+  status_heartbeat_seconds: 60
+schema:
+  matter_passcode: str?
+  matter_discriminator: str?
+  matter_port: port
+  matter_tcp: bool
+  product_name: str
+  matter_log_level: list(debug|info|notice|warn|error|fatal)
+  status_heartbeat_seconds: int

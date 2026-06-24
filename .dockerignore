@@ -1,0 +1,13 @@
+.git
+.env
+.pycache
+__pycache__
+*.pyc
+
+matter-storage
+media/__pycache__
+relay
+snapshots
+sidecar/node_modules
+
+.DS_Store

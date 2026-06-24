@@ -1,0 +1,82 @@
+# Matter Camera Bridge Debug Skill
+
+Use this runbook when debugging the Stream to Matter camera bridge against Home Assistant's Open Home Foundation Matter Server.
+
+## Critical Lessons
+
+- The Matter topology that should make camera children discoverable is Root Node -> Aggregator endpoint -> bridged child Camera endpoints. Each camera endpoint must include `BridgedDeviceBasicInformation`; matter.js then injects the `BridgedNode` device type while preserving the `Camera` device type.
+- `BridgedDeviceBasicInformation` only initializes under an Aggregator endpoint. If cameras are added directly to the root node, matter.js rejects the bridged-info cluster.
+- Keep `BridgedDeviceBasicInformation.uniqueId` at 32 characters or less. Matter.js returns constraint error 135 when it is too long.
+- Do not treat raw RTSP, snapshot, or WHEP success as sufficient. The target success signal is a Matter controller live view or snapshot request flowing through the Matter camera clusters.
+- Home Assistant may invoke `WebRtcTransportProvider.provideOffer` with `originatingEndpointId: 2`. The bridge must send `WebRtcTransportRequestor.answer` and `WebRtcTransportRequestor.iceCandidates` back to that endpoint, not blindly endpoint `0`.
+- The Matter live-view path that worked used `provideOffer`, not `solicitOffer`: HA sent its SDP offer to the camera endpoint, the bridge forwarded it to the WHEP relay, then the bridge invoked the controller requestor callback with the SDP answer.
+- A successful live run should show all of these in `/api/logs` or `/status`:
+  - `video_stream_allocate`
+  - `audio_stream_allocate`
+  - `provide_offer_forward_whep` with `originatingEndpointId`
+  - `provide_offer_answer_ready`
+  - `requestor_answer_sent` with `status: 0`
+  - `requestor_ice_candidates_sent` with `status: 0`
+  - `provide_ice_candidates_forward_ok`
+- A successful media relay should show the active WHEP session as `connectionState: connected` and `iceConnectionState: completed` in the relay `/health` output.
+- Snapshot success should show `capture_snapshot_complete` with non-zero `bytes`.
+- PTZ success should show `ptz_relative_ok` or another PTZ success event after a Matter PTZ command.
+- If `VideoStreamAllocate` succeeds but `send_webrtc_provider_command` or `CaptureSnapshot` fails with `peer-unreachable`, inspect the Matter Server log for `PeerConnection ... tcp://[fe80::...%iface]:5540 ... TCP connection timeout`. That means the controller is using a bad operational TCP route, not that RTSP/WHEP is broken. Keep `MATTER_TCP=false` unless a specific controller requires TCP.
+
+## Current Verified Command Set
+
+These checks were used for the local Node 33 test:
+
+```bash
+curl -sS http://127.0.0.1:18092/status
+curl -sS http://127.0.0.1:18092/api/logs
+curl -sS http://127.0.0.1:18889/health
+```
+
+Expected bridge topology evidence:
+
+```json
+{
+  "bridgeTopology": {
+    "aggregatorId": "camera_bridge",
+    "aggregatorAttached": true,
+    "childDeviceType": "BridgedNode/Camera"
+  }
+}
+```
+
+Expected live-view evidence:
+
+```json
+{
+  "event": "requestor_answer_sent",
+  "endpoint": 2,
+  "result": [{ "kind": "cmd-status", "status": 0 }]
+}
+```
+
+Expected WHEP evidence:
+
+```json
+{
+  "connectionState": "connected",
+  "iceConnectionState": "completed"
+}
+```
+
+## Debugging Order
+
+1. Confirm the bridge can probe the real camera and reports H.264 video.
+2. Confirm `/snapshot-data.jpg` returns non-empty JPEG bytes.
+3. Confirm the WHEP relay can negotiate outside Matter.
+4. Trigger live view from the Matter Server UI and inspect `/api/logs`.
+5. If live view fails, inspect the `originatingEndpointId`, callback status, and whether the WHEP session reaches ICE completed.
+6. Only change Matter device definitions after command flow and callback routing have been proven wrong.
+
+## Anti-Regressions
+
+- Preserve callback routing through the controller-provided `originatingEndpointId`.
+- Keep fallback callback attempts visible in diagnostic logs.
+- Do not remove `provideOffer` handling while HA's dashboard uses it for live view.
+- Keep snapshot resizing wired to the requested Matter resolution and quality.
+- Keep the add-on mirror under `stream-to-matter/` synced with the top-level runtime files.

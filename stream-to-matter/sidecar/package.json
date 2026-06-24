@@ -1,0 +1,17 @@
+{
+  "name": "stream-to-matter-sidecar",
+  "version": "0.1.32",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test",
+    "whep:check": "node scripts/whepCheck.js"
+  },
+  "dependencies": {
+    "@matter/main": "0.17.3",
+    "@matter/node": "0.17.3",
+    "@matter/nodejs": "0.17.3",
+    "werift": "^0.23.0"
+  }
+}

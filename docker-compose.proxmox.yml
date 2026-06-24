@@ -1,0 +1,49 @@
+services:
+  stream-to-matter:
+    build: .
+    container_name: stream-to-matter
+    network_mode: host
+    environment:
+      STREAM_TO_MATTER_CONFIG: /app/config/cameras.json
+      STREAM_TO_MATTER_PORT: "8080"
+      CAMERA_ID: ${CAMERA_ID:-stream_to_matter_camera}
+      CAMERA_NAME: ${CAMERA_NAME:-Camera}
+      CAMERA_RTSP_URL: ${CAMERA_RTSP_URL}
+      CAMERA_ONVIF_HOST: ${CAMERA_ONVIF_HOST}
+      CAMERA_ONVIF_PORT: ${CAMERA_ONVIF_PORT}
+      CAMERA_ONVIF_USER: ${CAMERA_ONVIF_USER}
+      CAMERA_ONVIF_PASSWORD: ${CAMERA_ONVIF_PASSWORD}
+    volumes:
+      - ./config:/app/config:ro
+      - ./snapshots:/app/snapshots
+      - ./relay:/app/relay
+
+  matter-sidecar:
+    build:
+      context: ./sidecar
+    container_name: stream-to-matter-sidecar
+    network_mode: host
+    depends_on:
+      - stream-to-matter
+    environment:
+      BRIDGE_URL: http://127.0.0.1:8080
+      MEDIA_WHEP_BASE_URL: http://127.0.0.1:8889
+      CAMERA_ID: ${CAMERA_ID:-stream_to_matter_camera}
+      MATTER_SIDECAR_PORT: "8090"
+      SIDECAR_MODE: manifest-validated
+      MATTER_PASSCODE: "20202021"
+      MATTER_DISCRIMINATOR: "3840"
+      MATTER_STORAGE_NODE_DIR: /root/.matter/node0
+    volumes:
+      - ./matter-storage:/root/.matter
+
+  media-webrtc:
+    build:
+      context: ./media
+    container_name: stream-to-matter-media-webrtc
+    profiles:
+      - media
+    network_mode: host
+    environment:
+      WHEP_RELAY_PORT: "8889"
+      CAMERA_MEDIA_SOURCE: ${CAMERA_MEDIA_SOURCE:-}

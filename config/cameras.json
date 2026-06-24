@@ -1,0 +1,23 @@
+{
+  "cameras": [
+    {
+      "id": "${CAMERA_ID:-stream_to_matter_camera}",
+      "name": "${CAMERA_NAME:-Camera}",
+      "rtsp_url": "${CAMERA_RTSP_URL:-rtsp://127.0.0.1:8554/camera}",
+      "onvif": {
+        "host": "${CAMERA_ONVIF_HOST:-192.168.1.10}",
+        "port": "${CAMERA_ONVIF_PORT:-80}",
+        "user": "${CAMERA_ONVIF_USER:-user}",
+        "password": "${CAMERA_ONVIF_PASSWORD:-password}"
+      },
+      "matter": {
+        "device_type": "camera",
+        "standard": "Matter 1.5.1",
+        "advertise_ptz": true,
+        "advertise_audio": true,
+        "advertise_two_way_audio": false,
+        "advertise_recording": false
+      }
+    }
+  ]
+}

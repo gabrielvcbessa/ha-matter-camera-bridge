@@ -1,0 +1,10 @@
+.git
+.env
+node_modules
+npm-debug.log
+
+matter-storage
+relay
+snapshots
+
+.DS_Store
