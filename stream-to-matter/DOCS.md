@@ -43,6 +43,46 @@ uses the known development defaults that pair reliably in local testing:
 passcode `20202021` and discriminator `3840`. Fill those fields only when you
 intentionally want an advanced development override.
 
+Keep `matter_tcp` enabled for Home Assistant Matter Server. Live view uses
+Matter camera WebRTC commands that are large enough to require the operational
+TCP path.
+
+Set `matter_listen_ipv4` to the Home Assistant host IP address, not the camera
+IP. Set `matter_mdns_interface` to the network interface that owns that IP, and
+keep `matter_mdns_ipv6` disabled unless your IPv6 link-local route is known to
+be stable.
+
+From the Home Assistant Terminal/SSH add-on, this command shows both values:
+
+```bash
+ip route get 1.1.1.1
+```
+
+Example:
+
+```text
+1.1.1.1 via 192.168.68.1 dev enp1s0 src 192.168.68.110 uid 0
+```
+
+Use:
+
+```yaml
+matter_listen_ipv4: "192.168.68.110"
+matter_mdns_interface: "enp1s0"
+matter_mdns_ipv6: false
+```
+
+If Home Assistant Matter Server logs show
+`tcp://[fe80::...%enp1s0]:5540` followed by `TCP connection timeout`, the
+controller selected an unreachable IPv6 link-local route. The interface name is
+the value after `%`; set `matter_mdns_interface` to that value and keep
+`matter_mdns_ipv6` disabled.
+
+After changing these Matter network options, restart the add-on. If the bridge
+was already paired before the values were corrected, remove it from the Open
+Home Foundation Matter Server, rotate/reset the Matter identity in the Web UI,
+restart the add-on, and pair again.
+
 `status_heartbeat_seconds` controls the periodic camera status line. Set it to
 `0` to disable the heartbeat.
 
@@ -75,7 +115,12 @@ For video diagnostics:
 ```bash
 curl http://HOME_ASSISTANT_IP:8090/status
 curl http://HOME_ASSISTANT_IP:8080/cameras/stream_to_matter_camera/probe
+curl http://HOME_ASSISTANT_IP:8090/api/logs?limit=80
 ```
+
+In `/api/logs`, `matter.node_started` should report `network.tcp: true`,
+`listen.listeningAddressIpv4` set to the Home Assistant IP, and
+`mdns.ipv6: false`.
 
 The add-on logs one compact heartbeat:
 

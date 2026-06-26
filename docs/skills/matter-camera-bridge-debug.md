@@ -23,6 +23,9 @@ Use this runbook when debugging the Stream to Matter camera bridge against Home 
 - PTZ success should show `ptz_relative_ok` or another PTZ success event after a Matter PTZ command.
 - If `VideoStreamAllocate` succeeds but `send_webrtc_provider_command` or `CaptureSnapshot` fails with `peer-unreachable`, inspect the Matter Server log for `PeerConnection ... tcp://[fe80::...%iface]:5540 ... TCP connection timeout` or `ECONNREFUSED`. In local HA Matter Server 9.0.2 testing, this reproduced when the node was commissioned but the add-on restarted with `MATTER_TCP=false`: allocation still worked over UDP, but `ProvideOffer` never reached the camera. The Home Assistant add-on should run with `MATTER_TCP=true`, and `/api/logs` should show `matter.node_started` with `network.tcp: true`.
 - If TCP is true and the same log still shows `peer-unreachable` on `tcp://[fe80::...%iface]:5540`, the controller is selecting an unreachable link-local IPv6 operational address. Keep `MATTER_MDNS_IPV6=false`, set `MATTER_LISTENING_ADDRESS_IPV4`/`matter_listen_ipv4` to the Home Assistant host IP, and set `MATTER_MDNS_INTERFACE` to the interface name shown in the Matter Server log, for example `enp1s0`.
+- To find the Home Assistant IP/interface pair, run `ip route get 1.1.1.1` from the Home Assistant Terminal/SSH add-on. Use `src` as `matter_listen_ipv4` and `dev` as `matter_mdns_interface`; for example `dev enp1s0 src 192.168.68.110` maps to `matter_mdns_interface: enp1s0` and `matter_listen_ipv4: "192.168.68.110"`.
+- If a bridge was paired before the IPv4/interface settings were correct, removing it from the Open Home Foundation Matter Server may not be enough. Use the bridge Web UI identity reset/rotate action, restart the add-on, and commission again so the controller learns the corrected operational address.
+- The proved good production shape is `matter_tcp: true`, `matter_listen_ipv4` set to the Home Assistant host IP, `matter_mdns_interface` set to the interface that owns that IP, and `matter_mdns_ipv6: false`. `/api/logs` should show `matter.node_started` with `network.tcp: true`, `listen.listeningAddressIpv4`, and `mdns.ipv6: false`.
 
 ## Current Verified Command Set
 
@@ -70,9 +73,10 @@ Expected WHEP evidence:
 1. Confirm the bridge can probe the real camera and reports H.264 video.
 2. Confirm `/snapshot-data.jpg` returns non-empty JPEG bytes.
 3. Confirm the WHEP relay can negotiate outside Matter.
-4. Trigger live view from the Matter Server UI and inspect `/api/logs`.
-5. If live view fails, inspect the `originatingEndpointId`, callback status, and whether the WHEP session reaches ICE completed.
-6. Only change Matter device definitions after command flow and callback routing have been proven wrong.
+4. Confirm Matter networking before pairing or after every identity rotation: `/api/logs` should show TCP enabled, IPv6 mDNS disabled, and the Home Assistant IPv4 listen address.
+5. Trigger live view from the Matter Server UI and inspect `/api/logs`.
+6. If live view fails, inspect the `originatingEndpointId`, callback status, and whether the WHEP session reaches ICE completed.
+7. Only change Matter device definitions after command flow, operational addressing, and callback routing have been proven wrong.
 
 ## Anti-Regressions
 

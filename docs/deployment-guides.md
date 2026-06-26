@@ -47,7 +47,7 @@ matter_discriminator: ""
 matter_port: 5540
 matter_tcp: true
 matter_listen_ipv4: "192.168.68.110"
-matter_mdns_interface: ""
+matter_mdns_interface: "enp1s0"
 matter_mdns_ipv6: false
 product_name: Stream to Matter Camera Bridge
 matter_log_level: warn
@@ -65,16 +65,50 @@ view is large and follows the operational TCP path. When TCP is disabled, the
 camera may still show video allocation events while live view and snapshots fail
 with `Operation aborted` or `peer-unreachable`.
 
-Set `matter_listen_ipv4` to the Home Assistant host IP address. On the tested
-production network that is `192.168.68.110`. This gives Home Assistant Matter
-Server a stable operational address after add-on restarts.
+Set `matter_listen_ipv4` to the Home Assistant host IP address, not the camera
+IP and not `homeassistant.local`. On the tested production network that is
+`192.168.68.110`. This gives Home Assistant Matter Server a stable operational
+address after add-on restarts.
 
 Keep `matter_mdns_ipv6` disabled on Home Assistant OS unless you know the host's
 IPv6 link-local route is stable. The Home Assistant Matter Server prefers
 link-local IPv6 over IPv4 when both are advertised; if it selects an unreachable
 `fe80::...:5540` address, live view hangs after `VideoStreamAllocate` and then
-aborts. If the Matter Server log shows a specific interface such as `enp1s0`,
-set `matter_mdns_interface: enp1s0` to limit Matter mDNS to that interface.
+aborts.
+
+Set `matter_mdns_interface` to the Home Assistant network interface that owns
+`matter_listen_ipv4`. This is often `enp1s0`, `eth0`, or `end0`.
+
+To find both values from the Home Assistant Terminal/SSH add-on:
+
+```bash
+ip route get 1.1.1.1
+```
+
+Use the `src` value as `matter_listen_ipv4` and the `dev` value as
+`matter_mdns_interface`. Example output:
+
+```text
+1.1.1.1 via 192.168.68.1 dev enp1s0 src 192.168.68.110 uid 0
+```
+
+That maps to:
+
+```yaml
+matter_listen_ipv4: "192.168.68.110"
+matter_mdns_interface: "enp1s0"
+matter_mdns_ipv6: false
+```
+
+You can also find the interface in the Home Assistant Matter Server logs. If
+the log shows a failed connection like
+`tcp://[fe80::...%enp1s0]:5540`, the value after `%` is the interface name.
+
+After changing these options, restart the add-on. If the bridge was already
+paired before these values were fixed, remove it from the Open Home Foundation
+Matter Server, use the Web UI danger action to rotate/reset the Matter identity,
+restart the add-on, and pair again. This makes the controller forget any cached
+bad operational address.
 
 After starting the add-on, open **Web UI** and edit the camera card. `rtsp_url`
 is the camera stream the dashboard probes for video and snapshots.
@@ -113,6 +147,7 @@ From a terminal that can reach Home Assistant:
 curl http://HOME_ASSISTANT_IP:8080/health
 curl http://HOME_ASSISTANT_IP:8090/health
 curl http://HOME_ASSISTANT_IP:8889/health
+curl http://HOME_ASSISTANT_IP:8090/api/logs?limit=80
 ```
 
 Expected:
@@ -120,6 +155,9 @@ Expected:
 - bridge health returns `ok: true`
 - sidecar health returns `matterNodeStarted: true`
 - WHEP health returns `configuredSources` with the camera stream source
+- `/api/logs` includes `matter.node_started` with `network.tcp: true`,
+  `listen.listeningAddressIpv4` set to the Home Assistant IP, and
+  `mdns.ipv6: false`
 
 ### Pair With Matter
 
