@@ -1,1 +1,1 @@
-export const SOFTWARE_VERSION = process.env.npm_package_version ?? "0.1.33";
+export const SOFTWARE_VERSION = process.env.npm_package_version ?? "0.1.34";

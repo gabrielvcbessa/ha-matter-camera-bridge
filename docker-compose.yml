@@ -27,6 +27,7 @@ services:
       - stream-to-matter
     ports:
       - "8090:8090"
+      - "5540:5540/tcp"
       - "5540:5540/udp"
     environment:
       BRIDGE_URL: http://stream-to-matter:8080
@@ -37,6 +38,7 @@ services:
       MATTER_PASSCODE: "20202021"
       MATTER_DISCRIMINATOR: "3840"
       MATTER_STORAGE_NODE_DIR: /root/.matter/node0
+      MATTER_TCP: "true"
     volumes:
       - ./matter-storage:/root/.matter
 

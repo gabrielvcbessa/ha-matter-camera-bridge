@@ -21,7 +21,7 @@ Use this runbook when debugging the Stream to Matter camera bridge against Home 
 - A successful media relay should show the active WHEP session as `connectionState: connected` and `iceConnectionState: completed` in the relay `/health` output.
 - Snapshot success should show `capture_snapshot_complete` with non-zero `bytes`.
 - PTZ success should show `ptz_relative_ok` or another PTZ success event after a Matter PTZ command.
-- If `VideoStreamAllocate` succeeds but `send_webrtc_provider_command` or `CaptureSnapshot` fails with `peer-unreachable`, inspect the Matter Server log for `PeerConnection ... tcp://[fe80::...%iface]:5540 ... TCP connection timeout`. That means the controller is using a bad operational TCP route, not that RTSP/WHEP is broken. Keep `MATTER_TCP=false` unless a specific controller requires TCP.
+- If `VideoStreamAllocate` succeeds but `send_webrtc_provider_command` or `CaptureSnapshot` fails with `peer-unreachable`, inspect the Matter Server log for `PeerConnection ... tcp://[fe80::...%iface]:5540 ... TCP connection timeout` or `ECONNREFUSED`. In local HA Matter Server 9.0.2 testing, this reproduced when the node was commissioned but the add-on restarted with `MATTER_TCP=false`: allocation still worked over UDP, but `ProvideOffer` never reached the camera. The Home Assistant add-on should run with `MATTER_TCP=true`, and `/api/logs` should show `matter.node_started` with `network.tcp: true`.
 
 ## Current Verified Command Set
 

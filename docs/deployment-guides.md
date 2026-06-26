@@ -44,7 +44,7 @@ Global add-on options:
 ```yaml
 matter_passcode: ""
 matter_discriminator: ""
-matter_tcp: false
+matter_tcp: true
 product_name: Stream to Matter Camera Bridge
 matter_log_level: warn
 status_heartbeat_seconds: 60
@@ -55,10 +55,11 @@ uses the known development defaults that pair reliably in local testing:
 passcode `20202021` and discriminator `3840`. Fill those fields only when you
 intentionally want an advanced development override.
 
-Keep `matter_tcp` disabled unless you are debugging a controller that explicitly
-needs Matter TCP. Home Assistant can otherwise pick stale IPv6 link-local TCP
-addresses after add-on restarts, which makes live view and snapshot commands
-fail with `Operation aborted` even though the RTSP camera probe is healthy.
+Keep `matter_tcp` enabled. Home Assistant's matter.js Matter Server can deliver
+small camera commands over UDP, but the WebRTC provider command used for live
+view is large and follows the operational TCP path. When TCP is disabled, the
+camera may still show video allocation events while live view and snapshots fail
+with `Operation aborted` or `peer-unreachable`.
 
 After starting the add-on, open **Web UI** and edit the camera card. `rtsp_url`
 is the camera stream the dashboard probes for video and snapshots.

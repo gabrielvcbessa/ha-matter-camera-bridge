@@ -46,8 +46,9 @@ if [[ -z "${MATTER_PORT}" ]]; then
   export MATTER_PORT=5540
 fi
 
-if [[ -z "${MATTER_TCP}" ]]; then
-  export MATTER_TCP=false
+if [[ "${MATTER_TCP}" != "true" ]]; then
+  log "Enabling Matter TCP. Home Assistant Matter Server uses TCP for camera WebRTC and snapshot command paths."
+  export MATTER_TCP=true
 fi
 
 if [[ -z "${STATUS_HEARTBEAT_SECONDS}" ]]; then
