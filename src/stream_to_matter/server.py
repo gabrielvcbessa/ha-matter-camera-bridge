@@ -261,6 +261,7 @@ def make_handler(state: BridgeState) -> type[BaseHTTPRequestHandler]:
                 "width": _bounded_int(query.get("width", [None])[0], 1, 3840),
                 "height": _bounded_int(query.get("height", [None])[0], 1, 2160),
                 "quality": _bounded_int(query.get("quality", [None])[0], 1, 100),
+                "max_bytes": _bounded_int(query.get("max_bytes", [None])[0], 1024, 1_000_000),
             }
 
         def _probe_camera(self, camera: CameraConfig) -> dict[str, object]:

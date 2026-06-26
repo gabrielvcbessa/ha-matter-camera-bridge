@@ -1,7 +1,9 @@
 import importlib.util
+import json
 import os
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -41,6 +43,27 @@ class WhepRelayTests(unittest.TestCase):
     def test_generic_source_env_fallback(self):
         with patch.dict(os.environ, {"MEDIA_SOURCE": "rtsp://generic/stream"}, clear=True):
             self.assertEqual(self.relay.source_for("unknown"), "rtsp://generic/stream")
+
+    def test_configured_source_names_include_config_camera_ids(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "cameras.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "cameras": [
+                            {"id": "front", "rtsp_url": "rtsp://user:secret@front/stream"},
+                            {"id": "empty", "rtsp_url": ""},
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch.dict(
+                os.environ,
+                {"STREAM_TO_MATTER_CONFIG": str(config_path), "MEDIA_SOURCE": "rtsp://generic/stream"},
+                clear=True,
+            ):
+                self.assertEqual(self.relay.configured_source_names(), ["MEDIA_SOURCE", "config:front"])
 
     def test_create_app_registers_health_route(self):
         app = self.relay.create_app()

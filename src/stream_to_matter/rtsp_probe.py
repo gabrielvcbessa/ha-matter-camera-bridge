@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import shutil
 import subprocess
 from typing import Any
@@ -88,6 +89,46 @@ def capture_snapshot(
     width: int | None = None,
     height: int | None = None,
     quality: int | None = None,
+    max_bytes: int | None = None,
+) -> dict[str, Any]:
+    quality_attempts = snapshot_quality_attempts(quality, max_bytes)
+    last_payload: dict[str, Any] | None = None
+    for candidate_quality in quality_attempts:
+        payload = _capture_snapshot_once(
+            rtsp_url,
+            output_path,
+            timeout_seconds=timeout_seconds,
+            width=width,
+            height=height,
+            quality=candidate_quality,
+        )
+        if not payload.get("ok"):
+            return payload
+        size = Path(output_path).stat().st_size
+        payload["bytes"] = size
+        payload["quality"] = candidate_quality
+        if not max_bytes or size <= max_bytes:
+            return payload
+        last_payload = payload
+
+    return {
+        "ok": False,
+        "error": f"Snapshot is {last_payload.get('bytes') if last_payload else 'unknown'} bytes, above the {max_bytes} byte Matter response budget",
+        "path": output_path,
+        "width": width,
+        "height": height,
+        "bytes": last_payload.get("bytes") if last_payload else None,
+        "quality": last_payload.get("quality") if last_payload else None,
+    }
+
+
+def _capture_snapshot_once(
+    rtsp_url: str,
+    output_path: str,
+    timeout_seconds: int,
+    width: int | None,
+    height: int | None,
+    quality: int | None,
 ) -> dict[str, Any]:
     command = [
         "ffmpeg",
@@ -115,6 +156,14 @@ def capture_snapshot(
     if completed.returncode != 0:
         return {"ok": False, "error": completed.stderr.strip()}
     return {"ok": True, "path": output_path, "width": width, "height": height}
+
+
+def snapshot_quality_attempts(quality: int | None, max_bytes: int | None) -> list[int | None]:
+    if not max_bytes:
+        return [quality]
+    start = max(1, min(100, quality if quality is not None else 80))
+    attempts = [start, 80, 70, 60, 50, 40, 30, 20, 10]
+    return list(dict.fromkeys(candidate for candidate in attempts if candidate <= start))
 
 
 def snapshot_filter_args(width: int | None, height: int | None, quality: int | None) -> list[str]:

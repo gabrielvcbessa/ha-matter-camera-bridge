@@ -1,3 +1,3 @@
 """RTSP/ONVIF to Matter camera bridge prototype."""
 
-__version__ = "0.1.28"
+__version__ = "0.1.33"

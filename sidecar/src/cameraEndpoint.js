@@ -20,6 +20,7 @@ let nextAudioStreamId = 1;
 let nextSnapshotStreamId = 2;
 let nextWebRtcSessionId = 1;
 const webRtcSessions = new Map();
+const MATTER_SNAPSHOT_RESPONSE_BUDGET_BYTES = 56_000;
 
 const WebRtcTransportProviderServerWithoutSFrame = webRtcTransportProviderWithoutSFrame(
   CameraRequirements.WebRtcTransportProviderServer
@@ -156,7 +157,8 @@ export function createBridgeCameraEndpoint(cameraId, bridgeClient, mediaClient =
         bytes = await bridgeClient.snapshotBytes(cameraId, "jpeg", {
           width: resolution.width,
           height: resolution.height,
-          quality: stream?.quality ?? 80
+          quality: stream?.quality ?? 80,
+          max_bytes: MATTER_SNAPSHOT_RESPONSE_BUDGET_BYTES
         });
       } catch (error) {
         logEvent("matter-camera", "capture_snapshot_failed", { cameraId, snapshotStreamId, ...errorFields(error) }, "error");
@@ -232,6 +234,9 @@ export function createBridgeCameraEndpoint(cameraId, bridgeClient, mediaClient =
       try {
         answer = await mediaClient.whepOffer(cameraId, request?.sdp ?? "");
       } catch (error) {
+        cleanupAllocatedStreamsAfterFailedOffer(this.state, request);
+        webRtcSessions.delete(webRtcSessionId);
+        markWebRtcSession(cameraId, webRtcSessionId, "failed", errorFields(error));
         logEvent("matter-camera", "provide_offer_failed", { cameraId, webRtcSessionId, ...errorFields(error) }, "error");
         throw error;
       }
@@ -667,6 +672,18 @@ function upsertWebRtcSession(state, session) {
     ...(state.currentSessions ?? []).filter(current => current.id !== session.id),
     session
   ];
+}
+
+function cleanupAllocatedStreamsAfterFailedOffer(state, request = {}) {
+  const { videoStreams = [], audioStreams = [] } = streamIdsFromRequest(request);
+  const videoIds = new Set(videoStreams);
+  const audioIds = new Set(audioStreams);
+  if (videoIds.size) {
+    state.allocatedVideoStreams = (state.allocatedVideoStreams ?? []).filter(stream => !videoIds.has(stream.videoStreamId));
+  }
+  if (audioIds.size) {
+    state.allocatedAudioStreams = (state.allocatedAudioStreams ?? []).filter(stream => !audioIds.has(stream.audioStreamId));
+  }
 }
 
 async function sendRequestorAnswer(behavior, cameraId, request, webRtcSessionId, sdp) {

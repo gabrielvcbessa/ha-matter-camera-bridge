@@ -24,6 +24,8 @@ class WhepSession:
 
 
 SESSIONS: dict[str, WhepSession] = {}
+RTSP_OPEN_ATTEMPTS = 3
+RTSP_OPEN_RETRY_DELAY_SECONDS = 0.75
 
 
 def log(message: str) -> None:
@@ -48,6 +50,25 @@ def source_from_config(camera_id: str) -> str | None:
         if str(camera.get("id", "")) == camera_id:
             return camera.get("media_source") or camera.get("rtsp_url")
     return None
+
+
+def configured_source_names() -> list[str]:
+    names = {
+        name
+        for name, value in os.environ.items()
+        if value and (name.endswith("_MEDIA_SOURCE") or name == "MEDIA_SOURCE")
+    }
+    config_path = os.environ.get("STREAM_TO_MATTER_CONFIG", "/data/cameras.json")
+    try:
+        with open(config_path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except OSError:
+        return sorted(names)
+    for camera in payload.get("cameras", []):
+        camera_id = str(camera.get("id", "")).strip()
+        if camera_id and (camera.get("media_source") or camera.get("rtsp_url")):
+            names.add(f"config:{camera_id}")
+    return sorted(names)
 
 
 def now_iso() -> str:
@@ -87,12 +108,19 @@ def describe_sdp(sdp: str) -> dict[str, object]:
 
 
 async def open_player_or_error(camera_id: str, source: str, mode: str, peer: RTCPeerConnection) -> tuple[MediaPlayer | None, web.Response | None]:
-    try:
-        return MediaPlayer(source, format="rtsp", options={"rtsp_transport": "tcp"}), None
-    except Exception as error:
-        await peer.close()
-        log(f"{mode} camera={camera_id} status=open-failed error={error}")
-        return None, web.json_response({"ok": False, "error": f"Could not open RTSP source: {error}"}, status=503)
+    last_error: Exception | None = None
+    for attempt in range(1, RTSP_OPEN_ATTEMPTS + 1):
+        try:
+            return MediaPlayer(source, format="rtsp", options={"rtsp_transport": "tcp"}), None
+        except Exception as error:
+            last_error = error
+            log(f"{mode} camera={camera_id} status=open-retry attempt={attempt}/{RTSP_OPEN_ATTEMPTS} error={error}")
+            if attempt < RTSP_OPEN_ATTEMPTS:
+                await asyncio.sleep(RTSP_OPEN_RETRY_DELAY_SECONDS)
+
+    await peer.close()
+    log(f"{mode} camera={camera_id} status=open-failed error={last_error}")
+    return None, web.json_response({"ok": False, "error": f"Could not open RTSP source: {last_error}"}, status=503)
 
 
 async def post_whep(request: web.Request) -> web.Response:
@@ -259,11 +287,7 @@ async def options(_request: web.Request) -> web.Response:
 
 
 async def health(_request: web.Request) -> web.Response:
-    configured = sorted(
-        name
-        for name, value in os.environ.items()
-        if value and (name.endswith("_MEDIA_SOURCE") or name == "MEDIA_SOURCE")
-    )
+    configured = configured_source_names()
     sessions = [
         {
             "id": session_id,
