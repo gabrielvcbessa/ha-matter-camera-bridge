@@ -40,10 +40,23 @@ test("advertises bridged camera identity metadata", () => {
     hardwareVersion: 1,
     hardwareVersionString: "1",
     softwareVersion: 1,
-    softwareVersionString: "0.1.35",
+    softwareVersionString: "0.1.36",
     uniqueId: "stm-front_door",
     configurationVersion: 1
   });
+});
+
+test("advertises Matter mechanical PTZ by default", () => {
+  const options = cameraEndpointOptions("front_door", "Front Door");
+
+  assert.ok(options.cameraAvSettingsUserLevelManagement);
+  assert.deepEqual(options.cameraAvSettingsUserLevelManagement.mptzPosition, { pan: 0, tilt: 0, zoom: 1 });
+});
+
+test("can disable Matter mechanical PTZ advertisement", () => {
+  const options = cameraEndpointOptions("fixed_camera", "Fixed Camera", { advertisePtz: false });
+
+  assert.equal(options.cameraAvSettingsUserLevelManagement, undefined);
 });
 
 test("adds a hash suffix to long bridged camera unique ids", () => {

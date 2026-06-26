@@ -19,9 +19,25 @@ const peer = new RTCPeerConnection({
 let closed = false;
 let whepSession = null;
 const events = [];
+const media = {
+  videoTracks: 0,
+  audioTracks: 0,
+  videoPackets: 0,
+  audioPackets: 0
+};
 
 peer.connectionStateChange.subscribe(state => events.push({ type: "connection", state }));
 peer.iceConnectionStateChange.subscribe(state => events.push({ type: "ice", state }));
+peer.ontrack = trackEvent => {
+  const track = trackEvent.track;
+  if (track.kind === "video") media.videoTracks += 1;
+  if (track.kind === "audio") media.audioTracks += 1;
+  events.push({ type: "track", kind: track.kind, id: track.id });
+  track.onReceiveRtp.subscribe(() => {
+    if (track.kind === "video") media.videoPackets += 1;
+    if (track.kind === "audio") media.audioPackets += 1;
+  });
+};
 
 try {
   peer.addTransceiver("video", { direction: "recvonly" });
@@ -35,19 +51,21 @@ try {
   await peer.setRemoteDescription({ type: "answer", sdp: answer.sdp });
 
   const connected = await waitForPeer(peer, timeoutMs);
+  const receivedVideo = await waitForVideo(media, timeoutMs);
   const result = {
-    ok: connected,
+    ok: connected && receivedVideo,
     cameraId,
     whepUrl: `${baseUrl.replace(/\/+$/, "")}/${encodeURIComponent(cameraId)}/whep`,
     answerBytes: answer.sdp.length,
     sessionLocation: answer.location,
     connectionState: peer.connectionState,
     iceConnectionState: peer.iceConnectionState,
+    media,
     events
   };
 
   console.log(JSON.stringify(result, null, 2));
-  if (!connected) {
+  if (!result.ok) {
     process.exitCode = 1;
   }
 
@@ -59,6 +77,7 @@ try {
     payload: error.payload ?? null,
     connectionState: peer.connectionState,
     iceConnectionState: peer.iceConnectionState,
+    media,
     events
   }, null, 2));
   process.exitCode = 1;
@@ -113,4 +132,29 @@ function isConnected(peerConnection) {
     peerConnection.iceConnectionState === "connected" ||
     peerConnection.iceConnectionState === "completed"
   );
+}
+
+function waitForVideo(mediaState, timeout) {
+  if (mediaState.videoPackets > 0) {
+    return Promise.resolve(true);
+  }
+
+  return new Promise(resolve => {
+    const started = Date.now();
+    const timer = setInterval(() => {
+      if (mediaState.videoPackets > 0) {
+        cleanup();
+        resolve(true);
+        return;
+      }
+      if (Date.now() - started >= timeout) {
+        cleanup();
+        resolve(false);
+      }
+    }, 100);
+
+    function cleanup() {
+      clearInterval(timer);
+    }
+  });
 }

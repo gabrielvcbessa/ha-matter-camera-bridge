@@ -173,3 +173,32 @@ test("extracts multiple camera ids from manifest", () => {
     {}
   ]), ["front_door", "garage"]);
 });
+
+test("extracts Matter PTZ and audio advertisement from manifest capabilities", async () => {
+  const { cameraDefinitionsFromManifest } = await import("../src/configStore.js");
+
+  assert.deepEqual(cameraDefinitionsFromManifest([
+    {
+      endpoint: {
+        id: "front_door",
+        name: "Front Door",
+        capabilities: [
+          { name: "ptz", status: "enabled" },
+          { name: "live_audio", status: "disabled" }
+        ]
+      }
+    },
+    {
+      endpoint: {
+        id: "fixed_camera",
+        capabilities: [
+          { name: "ptz", status: "disabled" },
+          { name: "live_audio", status: "enabled" }
+        ]
+      }
+    }
+  ]), [
+    { id: "front_door", name: "Front Door", advertise_ptz: true, advertise_audio: false },
+    { id: "fixed_camera", name: "fixed_camera", advertise_ptz: false, advertise_audio: true }
+  ]);
+});

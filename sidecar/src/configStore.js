@@ -63,13 +63,29 @@ export function cameraIdsFromManifest(manifest) {
 
 export function cameraDefinitionsFromManifest(manifest) {
   return (Array.isArray(manifest) ? manifest : [])
-    .map(item => ({
-      id: item?.endpoint?.id,
-      name: item?.endpoint?.name ?? item?.node?.product_name?.replace(/ Matter Camera Bridge$/, "") ?? item?.endpoint?.id
-    }))
+    .map(item => {
+      const capabilities = Array.isArray(item?.endpoint?.capabilities) ? item.endpoint.capabilities : [];
+      return {
+        id: item?.endpoint?.id,
+        name: item?.endpoint?.name ?? item?.node?.product_name?.replace(/ Matter Camera Bridge$/, "") ?? item?.endpoint?.id,
+        advertise_ptz: capabilityEnabled(capabilities, "ptz", true),
+        advertise_audio: capabilityEnabled(capabilities, "live_audio", true)
+      };
+    })
     .filter(camera => camera.id)
-    .map(camera => ({ id: String(camera.id), name: String(camera.name ?? camera.id) }))
+    .map(camera => ({
+      id: String(camera.id),
+      name: String(camera.name ?? camera.id),
+      advertise_ptz: Boolean(camera.advertise_ptz),
+      advertise_audio: Boolean(camera.advertise_audio)
+    }))
     .filter(Boolean);
+}
+
+function capabilityEnabled(capabilities, name, fallback) {
+  const capability = capabilities.find(item => item?.name === name);
+  if (!capability) return fallback;
+  return String(capability.status ?? "").toLowerCase() === "enabled";
 }
 
 function normalizeCamera(input, existing = {}) {

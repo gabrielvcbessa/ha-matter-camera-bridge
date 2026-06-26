@@ -39,6 +39,11 @@ export function dashboardHtml(status) {
     .preview img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #0b1014; border: 1px solid var(--line); border-radius: 8px; }
     .preview img[hidden] { display: none; }
     .preview-status { min-height: 18px; color: var(--muted); font-size: 13px; }
+    .ptz-grid { display: grid; grid-template-columns: repeat(3, 44px); gap: 6px; align-items: center; justify-content: start; }
+    .ptz-grid button { width: 44px; min-height: 38px; padding: 0; }
+    .ptz-actions { display: grid; gap: 8px; grid-template-columns: auto 1fr; align-items: start; }
+    .toggle { display: flex; gap: 8px; align-items: center; min-height: 38px; }
+    .toggle input { width: auto; min-height: auto; }
     .event-list { display: grid; gap: 8px; }
     .event { display: grid; gap: 4px; background: #11171c; border: 1px solid var(--line); border-radius: 7px; padding: 10px; }
     .event-meta { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; color: var(--muted); font-size: 12px; }
@@ -154,6 +159,7 @@ export function dashboardHtml(status) {
             <div id="snapshot-status-\${safeId(camera.id)}" class="preview-status"></div>
             <img id="snapshot-\${safeId(camera.id)}" alt="\${escapeHtml(camera.name)} preview" hidden>
           </div>
+          \${ptzSupportPanel(camera.id)}
           \${probeDetails(camera.probe)}
         </div>\`).join("") + '</div>' : "<p>No cameras configured.</p>";
       renderCameras();
@@ -308,6 +314,14 @@ export function dashboardHtml(status) {
               \${input(index, "onvif.password", "Password", "", camera.onvif?.password_set ? "Leave blank to keep existing password" : "")}
             </div>
           </fieldset>
+          <fieldset>
+            <legend>Matter Capabilities</legend>
+            <div class="form-grid">
+              \${checkbox(index, "matter.advertise_ptz", "Advertise mechanical PTZ to Matter controllers", camera.matter?.advertise_ptz !== false)}
+              \${checkbox(index, "matter.advertise_audio", "Advertise audio stream support", camera.matter?.advertise_audio !== false)}
+            </div>
+          </fieldset>
+          \${ptzTestPanel(camera, status)}
           </div>
         </details>\`;
       }).join("");
@@ -315,6 +329,56 @@ export function dashboardHtml(status) {
 
     function input(index, path, label, value = "", placeholder = "") {
       return \`<label><span class="label">\${label}</span><input data-index="\${index}" data-path="\${path}" value="\${escapeHtml(value)}" placeholder="\${escapeHtml(placeholder)}"></label>\`;
+    }
+
+    function checkbox(index, path, label, checked = false) {
+      return \`<label class="toggle"><input type="checkbox" data-index="\${index}" data-path="\${path}" data-type="boolean" \${checked ? "checked" : ""}><span>\${escapeHtml(label)}</span></label>\`;
+    }
+
+    function ptzSupportPanel(cameraId) {
+      const config = cameras.find(camera => camera.id === cameraId);
+      const endpoint = state.commissioning?.cameraEndpoints?.[cameraId];
+      const ptzAdvertised = config?.matter?.advertise_ptz !== false;
+      const observed = matterPtzObserved(cameraId);
+      return \`
+        <div class="notice">
+          <strong>PTZ path:</strong>
+          ONVIF moves the camera; Matter advertises mechanical PTZ \${ptzAdvertised ? "for this camera" : "only when enabled below"}; each controller decides whether to show those controls.
+          \${ptzAdvertised && endpoint?.attached && !observed ? "No Matter PTZ command has been observed from a controller yet." : ""}
+          \${observed ? "Matter PTZ commands have been observed for this camera." : ""}
+        </div>\`;
+    }
+
+    function ptzTestPanel(camera, status) {
+      const cameraId = camera.id;
+      const enabled = Boolean(cameraId);
+      const matterPtz = camera.matter?.advertise_ptz !== false;
+      const observed = matterPtzObserved(cameraId);
+      return \`
+        <fieldset>
+          <legend>PTZ Test</legend>
+          <div class="ptz-actions">
+            <div class="ptz-grid">
+              \${ptzButton(cameraId, "up-left", "UL", enabled)}\${ptzButton(cameraId, "up", "U", enabled)}\${ptzButton(cameraId, "up-right", "UR", enabled)}
+              \${ptzButton(cameraId, "left", "L", enabled)}<button type="button" onclick='checkPtz(\${jsString(cameraId)})' \${enabled ? "" : "disabled"}>OK</button>\${ptzButton(cameraId, "right", "R", enabled)}
+              \${ptzButton(cameraId, "down-left", "DL", enabled)}\${ptzButton(cameraId, "down", "D", enabled)}\${ptzButton(cameraId, "down-right", "DR", enabled)}
+            </div>
+            <div>
+              <div class="row">
+                \${ptzButton(cameraId, "zoom-in", "Zoom +", enabled)}
+                \${ptzButton(cameraId, "zoom-out", "Zoom -", enabled)}
+              </div>
+              <p class="label">Center dot checks ONVIF PTZ status. Arrows send a short move and stop.</p>
+              <p class="label">Matter PTZ advertised: \${matterPtz ? "yes" : "no"} · Matter PTZ command observed: \${observed ? "yes" : "no"} · Matter endpoint: \${status?.endpoint?.attached ? "attached" : "pending restart"}</p>
+              <div id="ptz-status-\${safeId(cameraId)}" class="preview-status"></div>
+            </div>
+          </div>
+          <p class="notice">Some Matter controllers may show the camera but not expose Matter camera PTZ controls yet. Use this test to separate ONVIF movement failures from controller UI support.</p>
+        </fieldset>\`;
+    }
+
+    function ptzButton(cameraId, direction, label, enabled) {
+      return \`<button type="button" onclick='movePtz(\${jsString(cameraId)}, \${jsString(direction)})' \${enabled ? "" : "disabled"}>\${escapeHtml(label)}</button>\`;
     }
 
     function rtspGuidance(camera) {
@@ -348,6 +412,14 @@ export function dashboardHtml(status) {
       }
     }
 
+    function matterPtzObserved(cameraId) {
+      const camera = (state.matterActivity?.cameras ?? []).find(item => item.id === cameraId);
+      return Boolean((camera?.commands ?? []).some(command =>
+        command.cluster === "CameraAvSettingsUserLevelManagement" &&
+        String(command.command ?? "").startsWith("mptz")
+      ));
+    }
+
     function probeDetails(probe) {
       if (!probe) return "";
       const errors = [];
@@ -378,7 +450,7 @@ export function dashboardHtml(status) {
           cursor[key] = cursor[key] ?? {};
           cursor = cursor[key];
         }
-        cursor[parts[0]] = input.value;
+        cursor[parts[0]] = input.dataset.type === "boolean" ? input.checked : input.value;
       });
       return next;
     }
@@ -415,6 +487,31 @@ export function dashboardHtml(status) {
         image.removeAttribute("src");
         image.hidden = true;
         status.textContent = "Snapshot failed: " + error.message;
+      }
+    };
+    window.checkPtz = async cameraId => {
+      const status = el("ptz-status-" + safeId(cameraId));
+      status.textContent = "Checking ONVIF PTZ status...";
+      try {
+        const response = await fetch("/api/cameras/" + encodeURIComponent(cameraId) + "/ptz/status?t=" + Date.now());
+        const payload = await response.json();
+        if (!response.ok || payload.ok === false) throw new Error(payload.error ?? "PTZ status failed");
+        status.textContent = "ONVIF PTZ status reachable.";
+      } catch (error) {
+        status.textContent = "ONVIF PTZ status failed: " + error.message;
+      }
+    };
+    window.movePtz = async (cameraId, direction) => {
+      const status = el("ptz-status-" + safeId(cameraId));
+      status.textContent = "Moving " + direction + "...";
+      try {
+        const response = await fetch("/camera/" + encodeURIComponent(cameraId) + "/ptz/" + encodeURIComponent(direction) + "?speed=0.25&stopAfterMs=200", { method: "POST" });
+        const payload = await response.json();
+        if (!response.ok || payload.ok === false) throw new Error(payload.error ?? deepErrorMessage(payload.payload ?? payload));
+        status.textContent = "PTZ " + direction + " succeeded.";
+        await refreshStatus();
+      } catch (error) {
+        status.textContent = "PTZ " + direction + " failed: " + error.message;
       }
     };
     el("add").onclick = () => {
@@ -465,6 +562,7 @@ export function dashboardHtml(status) {
       cameras = clone(payload.cameras ?? cameras);
       state.cameraConfig = payload;
       cameraConfigLoaded = true;
+      if (el("save-result")) el("save-result").textContent = "";
     }
     async function refreshStatus() {
       const response = await fetch("/api/status");

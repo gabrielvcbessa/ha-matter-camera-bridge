@@ -33,7 +33,8 @@ export function webRtcTransportProviderCommandFields(commandName) {
     ?.map(field => field.propertyName) ?? [];
 }
 
-export function createBridgeCameraEndpoint(cameraId, bridgeClient, mediaClient = null, cameraName = cameraId) {
+export function createBridgeCameraEndpoint(cameraId, bridgeClient, mediaClient = null, cameraName = cameraId, options = {}) {
+  const advertisePtz = options.advertisePtz !== false;
   const CameraAvStreamManagementWithImageControl =
     CameraAvStreamManagementServer.with("Video", "Audio", "Snapshot", "ImageControl");
   const CameraAvSettingsUserLevelManagementWithMptz =
@@ -378,26 +379,31 @@ export function createBridgeCameraEndpoint(cameraId, bridgeClient, mediaClient =
     }
   }
 
-  const BridgeCameraDevice = CameraDevice.with(
+  const bridgeBehaviors = [
     BridgeCameraAvStreamManagementServer,
     BridgeWebRtcTransportProviderServer,
     CameraRequirements.WebRtcTransportRequestorClient,
     BridgeZoneManagementServer,
-    BridgeCameraAvSettingsUserLevelManagementServer,
     BridgedDeviceBasicInformationServer,
     FixedLabelServer,
     UserLabelServer
-  );
+  ];
+  if (advertisePtz) {
+    bridgeBehaviors.splice(4, 0, BridgeCameraAvSettingsUserLevelManagementServer);
+  }
 
-  return new Endpoint(BridgeCameraDevice, cameraEndpointOptions(cameraId, cameraName));
+  const BridgeCameraDevice = CameraDevice.with(...bridgeBehaviors);
+
+  return new Endpoint(BridgeCameraDevice, cameraEndpointOptions(cameraId, cameraName, { advertisePtz }));
 }
 
-export function cameraEndpointOptions(cameraId, cameraName = cameraId) {
+export function cameraEndpointOptions(cameraId, cameraName = cameraId, options = {}) {
+  const advertisePtz = options.advertisePtz !== false;
   const sensor = { width: 1920, height: 1080, fps: 30 };
   const fullResolution = { width: sensor.width, height: sensor.height };
   const mobileResolution = { width: 1280, height: 720 };
   const snapshot = snapshotResolution();
-  return {
+  const endpointOptions = {
     id: cameraId,
     fixedLabel: {
       labelList: [
@@ -493,7 +499,12 @@ export function cameraEndpointOptions(cameraId, cameraName = cameraId) {
       sensitivity: 3,
       twoDCartesianMax: { x: sensor.width - 1, y: sensor.height - 1 }
     },
-    cameraAvSettingsUserLevelManagement: {
+    webRtcTransportProvider: {
+      currentSessions: []
+    }
+  };
+  if (advertisePtz) {
+    endpointOptions.cameraAvSettingsUserLevelManagement = {
       mptzPosition: { pan: 0, tilt: 0, zoom: 1 },
       movementState: CameraAvSettingsUserLevelManagement.PhysicalMovement.Idle,
       zoomMax: 100,
@@ -501,11 +512,9 @@ export function cameraEndpointOptions(cameraId, cameraName = cameraId) {
       tiltMax: 90,
       panMin: -180,
       panMax: 180
-    },
-    webRtcTransportProvider: {
-      currentSessions: []
-    }
-  };
+    };
+  }
+  return endpointOptions;
 }
 
 function webRtcTransportProviderWithoutSFrame(base) {

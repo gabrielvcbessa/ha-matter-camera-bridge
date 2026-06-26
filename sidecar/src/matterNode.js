@@ -117,7 +117,10 @@ export class MatterNodeRuntime {
     for (const camera of this.cameraDefinitions) {
       const cameraId = camera.id;
       try {
-        const endpoint = createBridgeCameraEndpoint(cameraId, this.bridgeClient, this.mediaClient, camera.name);
+        const endpoint = createBridgeCameraEndpoint(cameraId, this.bridgeClient, this.mediaClient, camera.name, {
+          advertisePtz: camera.advertise_ptz,
+          advertiseAudio: camera.advertise_audio
+        });
         await this.aggregator.add(endpoint);
         this.cameraEndpoints[cameraId] = {
           attached: true,
@@ -277,10 +280,15 @@ function normalizeCameraDefinitions(cameraDefinitions) {
     .map(value => {
       if (value && typeof value === "object") {
         const id = String(value.id ?? "").trim();
-        return id ? { id, name: String(value.name ?? id).trim() || id } : null;
+        return id ? {
+          id,
+          name: String(value.name ?? id).trim() || id,
+          advertise_ptz: value.advertise_ptz !== false,
+          advertise_audio: value.advertise_audio !== false
+        } : null;
       }
       const id = String(value).trim();
-      return id ? { id, name: id } : null;
+      return id ? { id, name: id, advertise_ptz: true, advertise_audio: true } : null;
     })
     .filter(Boolean);
   const unique = new Map();

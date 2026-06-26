@@ -1,0 +1,43 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Stream to Matter Camera Bridge",
+        "description": "Connect Home Assistant native camera entities to the running add-on.",
+        "data": {
+          "sidecar_url": "Sidecar URL",
+          "bridge_url": "Bridge URL",
+          "whep_url": "WHEP relay URL"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect to the Stream to Matter add-on."
+    }
+  },
+  "entity": {
+    "camera": {
+      "camera": {
+        "name": null
+      }
+    },
+    "button": {
+      "ptz_up": { "name": "Pan up" },
+      "ptz_down": { "name": "Pan down" },
+      "ptz_left": { "name": "Pan left" },
+      "ptz_right": { "name": "Pan right" },
+      "ptz_up_left": { "name": "Pan up left" },
+      "ptz_up_right": { "name": "Pan up right" },
+      "ptz_down_left": { "name": "Pan down left" },
+      "ptz_down_right": { "name": "Pan down right" },
+      "ptz_zoom_in": { "name": "Zoom in" },
+      "ptz_zoom_out": { "name": "Zoom out" }
+    },
+    "binary_sensor": {
+      "probe_ok": { "name": "Probe" },
+      "video_detected": { "name": "Video" },
+      "audio_detected": { "name": "Audio" },
+      "matter_endpoint_attached": { "name": "Matter endpoint" }
+    }
+  }
+}

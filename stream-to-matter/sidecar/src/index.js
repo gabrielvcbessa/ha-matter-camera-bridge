@@ -131,7 +131,7 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "GET" && snapshotMatch) {
       const [, cameraId] = snapshotMatch;
       try {
-        const bytes = await bridge.snapshotBytes(decodeURIComponent(cameraId), "jpeg");
+        const bytes = await bridge.snapshotBytes(decodeURIComponent(cameraId), "jpeg", snapshotOptionsFromUrl(url));
         return bytesResponse(response, 200, "image/jpeg", Buffer.from(bytes));
       } catch (error) {
         logEvent("snapshot", "snapshot_failed", { cameraId: decodeURIComponent(cameraId), ...errorFields(error) }, "warn");
@@ -185,6 +185,23 @@ const server = http.createServer(async (request, response) => {
         stopped = await bridge.ptzStop(cameraId);
       }
       return json(response, 200, { ok: true, move, stopped });
+    }
+
+    const ptzStatusMatch = url.pathname.match(/^\/api\/cameras\/([^/]+)\/ptz\/status$/);
+    if (request.method === "GET" && ptzStatusMatch) {
+      const [, cameraId] = ptzStatusMatch;
+      try {
+        const payload = await bridge.ptzStatus(decodeURIComponent(cameraId));
+        logEvent("ptz", "status_checked", { cameraId: decodeURIComponent(cameraId), ok: Boolean(payload?.ok) });
+        return json(response, 200, payload);
+      } catch (error) {
+        logEvent("ptz", "status_failed", { cameraId: decodeURIComponent(cameraId), ...errorFields(error) }, "warn");
+        return json(response, error.status ?? 503, {
+          ok: false,
+          error: error.message,
+          payload: error.payload
+        });
+      }
     }
 
     const zonesMatch = url.pathname.match(/^\/camera\/([^/]+)\/zones\/(privacy|detection)$/);
@@ -385,6 +402,15 @@ function cameraStatusList() {
       endpoint: nodeStatus.cameraEndpoints?.[cameraId] ?? null
     };
   });
+}
+
+function snapshotOptionsFromUrl(url) {
+  return {
+    width: url.searchParams.get("width"),
+    height: url.searchParams.get("height"),
+    quality: url.searchParams.get("quality"),
+    max_bytes: url.searchParams.get("max_bytes")
+  };
 }
 
 async function readJson(request) {

@@ -28,6 +28,30 @@ test("fetches JPEG and HEIC snapshot byte endpoints", async () => {
   }
 });
 
+test("passes snapshot sizing options to bridge byte endpoint", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    let requestUrl = null;
+    globalThis.fetch = async url => {
+      requestUrl = url;
+      return {
+        ok: true,
+        arrayBuffer: async () => new Uint8Array([1]).buffer
+      };
+    };
+
+    const bridge = new BridgeClient("http://127.0.0.1:8080/");
+    await bridge.snapshotBytes("camera", "jpeg", { width: 640, height: 360, quality: 85, max_bytes: 200000 });
+
+    assert.equal(
+      requestUrl,
+      "http://127.0.0.1:8080/cameras/camera/snapshot-data.jpg?width=640&height=360&quality=85&max_bytes=200000"
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("parses snapshot byte errors as bridge JSON payloads", async () => {
   const originalFetch = globalThis.fetch;
   try {

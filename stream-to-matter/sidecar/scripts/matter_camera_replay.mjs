@@ -33,7 +33,7 @@ const node = await ServerNode.create({
     hardwareVersion: 1,
     hardwareVersionString: "1",
     softwareVersion: 1,
-    softwareVersionString: "0.1.35"
+    softwareVersionString: "0.1.36"
   },
   network: {
     port: 0,

@@ -85,7 +85,7 @@ def redact_url(rtsp_url: str) -> str:
 def capture_snapshot(
     rtsp_url: str,
     output_path: str,
-    timeout_seconds: int = 15,
+    timeout_seconds: int = 30,
     width: int | None = None,
     height: int | None = None,
     quality: int | None = None,
@@ -137,8 +137,11 @@ def _capture_snapshot_once(
         "tcp",
         "-i",
         rtsp_url,
+        "-an",
         *snapshot_filter_args(width, height, quality),
         "-frames:v",
+        "1",
+        "-update",
         "1",
         output_path,
     ]

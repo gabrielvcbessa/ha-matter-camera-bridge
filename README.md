@@ -171,6 +171,23 @@ matter-camera.capture_snapshot_complete
 matter-camera.snapshot_stream_deallocate
 ```
 
+## Optional Native Home Assistant Entities
+
+Matter camera support in Home Assistant is still catching up with the Matter
+Camera specification. This repository includes a proposal custom integration
+under `custom_components/stream_to_matter/` so Home Assistant can also create
+native entities directly from the add-on APIs.
+
+That integration creates one Home Assistant device per configured add-on camera,
+with a `camera` entity, PTZ buttons, and status sensors. The Matter bridge still
+runs normally; these native entities are an additional Home Assistant UI and
+automation surface.
+
+See [docs/home-assistant-native-integration.md](docs/home-assistant-native-integration.md)
+for install and local validation steps, including the Home Assistant-container
+smoke test that exercises snapshot, WebRTC live-view negotiation, PTZ, and
+status sensors through the native entities.
+
 ## Troubleshooting
 
 If live view hangs and then shows `Operation aborted`, check the Home Assistant
@@ -206,5 +223,6 @@ or non-Home Assistant installs.
 Developer and architecture notes:
 
 - [docs/deployment-guides.md](docs/deployment-guides.md)
+- [docs/home-assistant-native-integration.md](docs/home-assistant-native-integration.md)
 - [docs/matter-sidecar.md](docs/matter-sidecar.md)
 - [docs/skills/matter-camera-bridge-debug.md](docs/skills/matter-camera-bridge-debug.md)

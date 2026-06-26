@@ -27,6 +27,10 @@ export class BridgeClient {
     return this.#json(`/cameras/${cameraId}/ptz/stop`, { method: "POST" });
   }
 
+  async ptzStatus(cameraId) {
+    return this.#json(`/cameras/${cameraId}/ptz/status`);
+  }
+
   async ptzAbsolute(cameraId, pan = 0, tilt = 0, zoom = 0) {
     return this.#json(`/cameras/${cameraId}/ptz/absolute?pan=${pan}&tilt=${tilt}&zoom=${zoom}`, { method: "POST" });
   }
