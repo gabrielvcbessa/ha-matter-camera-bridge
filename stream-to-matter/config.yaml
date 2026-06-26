@@ -1,5 +1,5 @@
 name: Stream to Matter Parser
-version: "0.1.34"
+version: "0.1.35"
 slug: stream_to_matter
 description: RTSP/ONVIF camera to Matter camera bridge with PTZ and WHEP media.
 url: https://github.com/gabrielvcbessa/ha-matter-camera-bridge
@@ -33,6 +33,9 @@ options:
   matter_discriminator: ""
   matter_port: 5540
   matter_tcp: true
+  matter_listen_ipv4: ""
+  matter_mdns_interface: ""
+  matter_mdns_ipv6: false
   product_name: Stream to Matter Camera Bridge
   matter_log_level: warn
   status_heartbeat_seconds: 60
@@ -41,6 +44,9 @@ schema:
   matter_discriminator: str?
   matter_port: port
   matter_tcp: bool
+  matter_listen_ipv4: str?
+  matter_mdns_interface: str?
+  matter_mdns_ipv6: bool
   product_name: str
   matter_log_level: list(debug|info|notice|warn|error|fatal)
   status_heartbeat_seconds: int

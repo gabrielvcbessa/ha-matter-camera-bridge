@@ -39,6 +39,8 @@ services:
       MATTER_DISCRIMINATOR: "3840"
       MATTER_STORAGE_NODE_DIR: /root/.matter/node0
       MATTER_TCP: "true"
+      MATTER_LISTENING_ADDRESS_IPV4: ${MATTER_LISTENING_ADDRESS_IPV4:-}
+      MATTER_MDNS_IPV6: "false"
     volumes:
       - ./matter-storage:/root/.matter
 

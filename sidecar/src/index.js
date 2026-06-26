@@ -164,7 +164,7 @@ const server = http.createServer(async (request, response) => {
         pairable: matterNode.status().pairable,
         cameraIds
       });
-      return json(response, 200, onboardingPayload());
+      return json(response, 200, onboardingPayload({ includeSensitive: true }));
     }
 
     if (request.method === "POST" && url.pathname === "/matter/start") {

@@ -31,6 +31,9 @@ export MATTER_PASSCODE="$(json_get "${CONFIG_PATH}" matter_passcode)"
 export MATTER_DISCRIMINATOR="$(json_get "${CONFIG_PATH}" matter_discriminator)"
 export MATTER_PORT="$(json_get "${CONFIG_PATH}" matter_port)"
 export MATTER_TCP="$(json_get "${CONFIG_PATH}" matter_tcp)"
+export MATTER_LISTENING_ADDRESS_IPV4="$(json_get "${CONFIG_PATH}" matter_listen_ipv4)"
+export MATTER_MDNS_INTERFACE="$(json_get "${CONFIG_PATH}" matter_mdns_interface)"
+export MATTER_MDNS_IPV6="$(json_get "${CONFIG_PATH}" matter_mdns_ipv6)"
 export MATTER_PRODUCT_NAME="$(json_get "${CONFIG_PATH}" product_name)"
 export MATTER_NODE_LABEL="${MATTER_PRODUCT_NAME}"
 export MATTER_LOG_LEVEL="$(json_get "${CONFIG_PATH}" matter_log_level)"
@@ -49,6 +52,18 @@ fi
 if [[ "${MATTER_TCP}" != "true" ]]; then
   log "Enabling Matter TCP. Home Assistant Matter Server uses TCP for camera WebRTC and snapshot command paths."
   export MATTER_TCP=true
+fi
+
+if [[ -n "${MATTER_LISTENING_ADDRESS_IPV4}" ]]; then
+  log "Binding Matter IPv4 listener/advertisement to ${MATTER_LISTENING_ADDRESS_IPV4}"
+fi
+
+if [[ -z "${MATTER_MDNS_IPV6}" ]]; then
+  export MATTER_MDNS_IPV6=false
+fi
+
+if [[ -n "${MATTER_MDNS_INTERFACE}" ]]; then
+  log "Limiting Matter mDNS to interface ${MATTER_MDNS_INTERFACE}"
 fi
 
 if [[ -z "${STATUS_HEARTBEAT_SECONDS}" ]]; then

@@ -44,7 +44,11 @@ Global add-on options:
 ```yaml
 matter_passcode: ""
 matter_discriminator: ""
+matter_port: 5540
 matter_tcp: true
+matter_listen_ipv4: "192.168.68.110"
+matter_mdns_interface: ""
+matter_mdns_ipv6: false
 product_name: Stream to Matter Camera Bridge
 matter_log_level: warn
 status_heartbeat_seconds: 60
@@ -60,6 +64,17 @@ small camera commands over UDP, but the WebRTC provider command used for live
 view is large and follows the operational TCP path. When TCP is disabled, the
 camera may still show video allocation events while live view and snapshots fail
 with `Operation aborted` or `peer-unreachable`.
+
+Set `matter_listen_ipv4` to the Home Assistant host IP address. On the tested
+production network that is `192.168.68.110`. This gives Home Assistant Matter
+Server a stable operational address after add-on restarts.
+
+Keep `matter_mdns_ipv6` disabled on Home Assistant OS unless you know the host's
+IPv6 link-local route is stable. The Home Assistant Matter Server prefers
+link-local IPv6 over IPv4 when both are advertised; if it selects an unreachable
+`fe80::...:5540` address, live view hangs after `VideoStreamAllocate` and then
+aborts. If the Matter Server log shows a specific interface such as `enp1s0`,
+set `matter_mdns_interface: enp1s0` to limit Matter mDNS to that interface.
 
 After starting the add-on, open **Web UI** and edit the camera card. `rtsp_url`
 is the camera stream the dashboard probes for video and snapshots.

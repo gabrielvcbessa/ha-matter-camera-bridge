@@ -22,6 +22,7 @@ Use this runbook when debugging the Stream to Matter camera bridge against Home 
 - Snapshot success should show `capture_snapshot_complete` with non-zero `bytes`.
 - PTZ success should show `ptz_relative_ok` or another PTZ success event after a Matter PTZ command.
 - If `VideoStreamAllocate` succeeds but `send_webrtc_provider_command` or `CaptureSnapshot` fails with `peer-unreachable`, inspect the Matter Server log for `PeerConnection ... tcp://[fe80::...%iface]:5540 ... TCP connection timeout` or `ECONNREFUSED`. In local HA Matter Server 9.0.2 testing, this reproduced when the node was commissioned but the add-on restarted with `MATTER_TCP=false`: allocation still worked over UDP, but `ProvideOffer` never reached the camera. The Home Assistant add-on should run with `MATTER_TCP=true`, and `/api/logs` should show `matter.node_started` with `network.tcp: true`.
+- If TCP is true and the same log still shows `peer-unreachable` on `tcp://[fe80::...%iface]:5540`, the controller is selecting an unreachable link-local IPv6 operational address. Keep `MATTER_MDNS_IPV6=false`, set `MATTER_LISTENING_ADDRESS_IPV4`/`matter_listen_ipv4` to the Home Assistant host IP, and set `MATTER_MDNS_INTERFACE` to the interface name shown in the Matter Server log, for example `enp1s0`.
 
 ## Current Verified Command Set
 

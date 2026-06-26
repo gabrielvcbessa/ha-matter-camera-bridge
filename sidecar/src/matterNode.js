@@ -1,5 +1,6 @@
 import { ServerNode, Endpoint } from "@matter/main/node";
 import { AggregatorEndpoint } from "@matter/main/endpoints/aggregator";
+import { NodeJsNetwork } from "@matter/nodejs";
 import { createBridgeCameraEndpoint } from "./cameraEndpoint.js";
 import { errorFields, logEvent } from "./diagnosticLog.js";
 import { SOFTWARE_VERSION } from "./version.js";
@@ -8,6 +9,7 @@ const DEFAULT_PASSCODE = 20202021;
 const DEFAULT_DISCRIMINATOR = 3840;
 const DEFAULT_PORT = 5540;
 export const CAMERA_AGGREGATOR_ID = "camera_bridge";
+let originalGetIpMac = null;
 
 export class MatterNodeRuntime {
   constructor(bridgeClient = null, mediaClient = null, cameraDefinitions = ["camera"]) {
@@ -61,7 +63,9 @@ export class MatterNodeRuntime {
         cameraIds: this.cameraIds,
         credentialSource: process.env.MATTER_CREDENTIAL_SOURCE ?? "unknown",
         discriminator: numberEnv(process.env.MATTER_DISCRIMINATOR, DEFAULT_DISCRIMINATOR),
-        port: numberEnv(process.env.MATTER_PORT, DEFAULT_PORT)
+        port: numberEnv(process.env.MATTER_PORT, DEFAULT_PORT),
+        mdns: matterMdnsOptions(),
+        listen: listeningAddressOptions()
       });
       this.node = await ServerNode.create(matterServerNodeOptions());
       await this.#attachCameraEndpoint();
@@ -173,6 +177,7 @@ export class MatterNodeRuntime {
 }
 
 export function matterServerNodeOptions() {
+  configureMatterMdnsNetwork();
   return {
         id: process.env.MATTER_NODE_STORAGE_ID ?? "node0",
         productDescription: {
@@ -197,7 +202,8 @@ export function matterServerNodeOptions() {
         },
         network: {
           port: numberEnv(process.env.MATTER_PORT, DEFAULT_PORT),
-          tcp: matterTcpOption()
+          tcp: matterTcpOption(),
+          ...listeningAddressOptions()
         }
     };
 }
@@ -206,12 +212,52 @@ function matterTcpOption() {
   return envFlag(process.env.MATTER_TCP, false);
 }
 
+export function configureMatterMdnsNetwork() {
+  const options = matterMdnsOptions();
+  if (options.interface) {
+    process.env.MATTER_MDNS_NETWORKINTERFACE = options.interface;
+  }
+  if (!options.ipv6 && originalGetIpMac === null) {
+    originalGetIpMac = NodeJsNetwork.prototype.getIpMac;
+    NodeJsNetwork.prototype.getIpMac = function filteredGetIpMac(netInterface) {
+      const details = originalGetIpMac.call(this, netInterface);
+      return details ? { ...details, ipV6: [] } : details;
+    };
+  }
+  return options;
+}
+
+export function matterMdnsOptions() {
+  return {
+    interface: stringEnv(process.env.MATTER_MDNS_INTERFACE, ""),
+    ipv6: envFlag(process.env.MATTER_MDNS_IPV6, false)
+  };
+}
+
+function listeningAddressOptions() {
+  const options = {};
+  const ipv4 = stringEnv(process.env.MATTER_LISTENING_ADDRESS_IPV4 ?? process.env.MATTER_LISTEN_IPV4, "");
+  const ipv6 = stringEnv(process.env.MATTER_LISTENING_ADDRESS_IPV6 ?? process.env.MATTER_LISTEN_IPV6, "");
+  if (ipv4) {
+    options.listeningAddressIpv4 = ipv4;
+  }
+  if (ipv6) {
+    options.listeningAddressIpv6 = ipv6;
+  }
+  return options;
+}
+
 function numberEnv(value, fallback) {
   if (value === undefined || value === null || String(value).trim() === "") {
     return fallback;
   }
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function stringEnv(value, fallback) {
+  const normalized = String(value ?? "").trim();
+  return normalized || fallback;
 }
 
 function envFlag(value, fallback) {

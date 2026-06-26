@@ -40,7 +40,7 @@ test("advertises bridged camera identity metadata", () => {
     hardwareVersion: 1,
     hardwareVersionString: "1",
     softwareVersion: 1,
-    softwareVersionString: "0.1.34",
+    softwareVersionString: "0.1.35",
     uniqueId: "stm-front_door",
     configurationVersion: 1
   });

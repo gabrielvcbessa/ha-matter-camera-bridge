@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { CAMERA_AGGREGATOR_ID, matterServerNodeOptions } from "../src/matterNode.js";
+import { CAMERA_AGGREGATOR_ID, matterMdnsOptions, matterServerNodeOptions } from "../src/matterNode.js";
 
 test("uses stable Matter operational port by default", () => {
   const previousPort = process.env.MATTER_PORT;
@@ -42,6 +42,44 @@ test("allows Matter operational port override", () => {
     assert.equal(options.network.port, 5555);
   } finally {
     restoreEnv("MATTER_PORT", previousPort);
+  }
+});
+
+test("allows Matter IPv4 listen address override", () => {
+  const previousAddress = process.env.MATTER_LISTENING_ADDRESS_IPV4;
+  try {
+    process.env.MATTER_LISTENING_ADDRESS_IPV4 = "192.168.68.110";
+
+    const options = matterServerNodeOptions();
+
+    assert.equal(options.network.listeningAddressIpv4, "192.168.68.110");
+  } finally {
+    restoreEnv("MATTER_LISTENING_ADDRESS_IPV4", previousAddress);
+  }
+});
+
+test("filters IPv6 mDNS records by default for Home Assistant routing", () => {
+  const previousIpv6 = process.env.MATTER_MDNS_IPV6;
+  try {
+    delete process.env.MATTER_MDNS_IPV6;
+
+    assert.deepEqual(matterMdnsOptions(), { interface: "", ipv6: false });
+  } finally {
+    restoreEnv("MATTER_MDNS_IPV6", previousIpv6);
+  }
+});
+
+test("allows Matter mDNS interface and IPv6 override", () => {
+  const previousInterface = process.env.MATTER_MDNS_INTERFACE;
+  const previousIpv6 = process.env.MATTER_MDNS_IPV6;
+  try {
+    process.env.MATTER_MDNS_INTERFACE = "enp1s0";
+    process.env.MATTER_MDNS_IPV6 = "true";
+
+    assert.deepEqual(matterMdnsOptions(), { interface: "enp1s0", ipv6: true });
+  } finally {
+    restoreEnv("MATTER_MDNS_INTERFACE", previousInterface);
+    restoreEnv("MATTER_MDNS_IPV6", previousIpv6);
   }
 });
 
