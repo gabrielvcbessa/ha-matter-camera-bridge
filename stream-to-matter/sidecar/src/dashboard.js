@@ -38,6 +38,8 @@ export function dashboardHtml(status) {
     .preview { display: grid; gap: 8px; }
     .preview img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #0b1014; border: 1px solid var(--line); border-radius: 8px; }
     .preview img[hidden] { display: none; }
+    .preview video { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #0b1014; border: 1px solid var(--line); border-radius: 8px; }
+    .preview video[hidden] { display: none; }
     .preview-status { min-height: 18px; color: var(--muted); font-size: 13px; }
     .ptz-grid { display: grid; grid-template-columns: repeat(3, 44px); gap: 6px; align-items: center; justify-content: start; }
     .ptz-grid button { width: 44px; min-height: 38px; padding: 0; }
@@ -116,6 +118,7 @@ export function dashboardHtml(status) {
     let cameras = [];
     let cameraConfigLoaded = false;
     let openCameraIndex = 0;
+    const livePreviews = new Map();
     const text = value => value === null || value === undefined || value === "" ? "Not ready" : String(value);
     const cls = value => value ? "ok" : "bad";
 
@@ -123,11 +126,13 @@ export function dashboardHtml(status) {
       const c = state.commissioning ?? {};
       const cameraStatuses = state.cameras ?? [];
       const attachedCount = Object.values(c.cameraEndpoints ?? {}).filter(v => v.attached).length;
+      const personCount = Object.values(c.personEndpoints ?? {}).filter(v => v.attached).length;
       const videoCount = cameraStatuses.filter(camera => camera.probe?.has_video).length;
       el("summary").innerHTML = [
         card("Bridge", state.bridgeHealth?.ok ? "Online" : "Offline", cls(state.bridgeHealth?.ok)),
         card("Matter Node", matterNodeLabel(c), matterNodeClass(c)),
         card("Camera Endpoints", attachedCount + " / " + cameraStatuses.length + " attached", attachedCount === cameraStatuses.length ? "ok" : "warn"),
+        card("Person Sensors", personCount + " attached", personCount ? "ok" : "warn"),
         card("Video Sources", videoCount + " / " + cameraStatuses.length + " detected", videoCount === cameraStatuses.length ? "ok" : "warn"),
         card("WHEP Relay", state.mediaHealth?.ok ? "Online" : "Offline", cls(state.mediaHealth?.ok))
       ].join("");
@@ -154,10 +159,13 @@ export function dashboardHtml(status) {
           <div class="preview">
             <div class="row">
               <button onclick='loadSnapshot(\${jsString(camera.id)})'>Load Snapshot</button>
-              <span class="label">Fetches one frame and closes the stream.</span>
+              <button onclick='startLivePreview(\${jsString(camera.id)})'>Start Live Preview</button>
+              <button onclick='stopLivePreview(\${jsString(camera.id)})'>Stop Preview</button>
+              <span class="label">Snapshot fetches one frame; live preview opens one extra stream until stopped.</span>
             </div>
             <div id="snapshot-status-\${safeId(camera.id)}" class="preview-status"></div>
             <img id="snapshot-\${safeId(camera.id)}" alt="\${escapeHtml(camera.name)} preview" hidden>
+            <video id="live-\${safeId(camera.id)}" autoplay playsinline muted hidden></video>
           </div>
           \${ptzSupportPanel(camera.id)}
           \${probeDetails(camera.probe)}
@@ -319,7 +327,9 @@ export function dashboardHtml(status) {
             <div class="form-grid">
               \${checkbox(index, "matter.advertise_ptz", "Advertise mechanical PTZ to Matter controllers", camera.matter?.advertise_ptz !== false)}
               \${checkbox(index, "matter.advertise_audio", "Advertise audio stream support", camera.matter?.advertise_audio !== false)}
+              \${checkbox(index, "matter.advertise_person_detection", "Add Matter person presence sensor endpoint", camera.matter?.advertise_person_detection === true)}
             </div>
+            <p class="label">Changing Matter endpoints requires an add-on restart. The person sensor exposes a standard occupancy-style endpoint for detection providers.</p>
           </fieldset>
           \${ptzTestPanel(camera, status)}
           </div>
@@ -460,6 +470,56 @@ export function dashboardHtml(status) {
       openCameraIndex = Math.max(0, Math.min(openCameraIndex, cameras.length - 1));
       renderCameras();
     };
+    window.startLivePreview = async cameraId => {
+      await window.stopLivePreview(cameraId);
+      const video = el("live-" + safeId(cameraId));
+      const status = el("snapshot-status-" + safeId(cameraId));
+      status.textContent = "Starting live preview...";
+      const peer = new RTCPeerConnection();
+      livePreviews.set(cameraId, { peer, location: null });
+      try {
+        peer.addTransceiver("video", { direction: "recvonly" });
+        peer.addTransceiver("audio", { direction: "recvonly" });
+        peer.ontrack = event => {
+          video.srcObject = event.streams[0] ?? new MediaStream([event.track]);
+          video.hidden = false;
+          status.textContent = "Live preview connected.";
+        };
+        const offer = await peer.createOffer();
+        await peer.setLocalDescription(offer);
+        await waitForIceGathering(peer);
+        const response = await fetch("/api/cameras/" + encodeURIComponent(cameraId) + "/whep", {
+          method: "POST",
+          headers: { "Content-Type": "application/sdp" },
+          body: peer.localDescription.sdp
+        });
+        const answer = await response.text();
+        if (!response.ok) throw new Error(answer);
+        const preview = livePreviews.get(cameraId);
+        if (preview) preview.location = response.headers.get("location");
+        await peer.setRemoteDescription({ type: "answer", sdp: answer });
+        status.textContent = "Live preview negotiating...";
+      } catch (error) {
+        await window.stopLivePreview(cameraId);
+        status.textContent = "Live preview failed: " + error.message;
+      }
+    };
+    window.stopLivePreview = async cameraId => {
+      const preview = livePreviews.get(cameraId);
+      livePreviews.delete(cameraId);
+      if (preview?.location) {
+        await fetch("/api/cameras/" + encodeURIComponent(cameraId) + "/whep-session?location=" + encodeURIComponent(preview.location), { method: "DELETE" }).catch(() => {});
+      }
+      await preview?.peer?.close?.();
+      const video = el("live-" + safeId(cameraId));
+      if (video?.srcObject) {
+        for (const track of video.srcObject.getTracks()) track.stop();
+      }
+      if (video) {
+        video.srcObject = null;
+        video.hidden = true;
+      }
+    };
     window.loadSnapshot = async cameraId => {
       const image = el("snapshot-" + safeId(cameraId));
       const status = el("snapshot-status-" + safeId(cameraId));
@@ -516,7 +576,7 @@ export function dashboardHtml(status) {
     };
     el("add").onclick = () => {
       openCameraIndex = cameras.length;
-      cameras.push({ id: "camera_" + (cameras.length + 1), name: "Camera " + (cameras.length + 1), rtsp_url: "", media_source: "", onvif: { host: "", port: 80, user: "", password_set: false }, matter: { advertise_ptz: true, advertise_audio: true } });
+      cameras.push({ id: "camera_" + (cameras.length + 1), name: "Camera " + (cameras.length + 1), rtsp_url: "", media_source: "", onvif: { host: "", port: 80, user: "", password_set: false }, matter: { advertise_ptz: true, advertise_audio: true, advertise_person_detection: false } });
       renderCameras();
     };
     el("save").onclick = async () => {
@@ -565,6 +625,7 @@ export function dashboardHtml(status) {
       if (el("save-result")) el("save-result").textContent = "";
     }
     async function refreshStatus() {
+      await stopAllLivePreviews();
       const response = await fetch("/api/status");
       state = await response.json();
       await refreshCameraConfig();
@@ -580,6 +641,27 @@ export function dashboardHtml(status) {
     function safeId(value) {
       return String(value ?? "").replace(/[^a-zA-Z0-9_-]/g, "_");
     }
+    async function stopAllLivePreviews() {
+      await Promise.all([...livePreviews.keys()].map(cameraId => stopLivePreview(cameraId)));
+    }
+    function waitForIceGathering(peer) {
+      if (peer.iceGatheringState === "complete") return Promise.resolve();
+      return new Promise(resolve => {
+        const timeout = setTimeout(done, 3000);
+        peer.addEventListener("icegatheringstatechange", () => {
+          if (peer.iceGatheringState === "complete") done();
+        });
+        function done() {
+          clearTimeout(timeout);
+          resolve();
+        }
+      });
+    }
+    window.addEventListener("beforeunload", () => {
+      for (const preview of livePreviews.values()) {
+        preview.peer?.close?.();
+      }
+    });
     function loadImage(image, objectUrl) {
       return new Promise((resolve, reject) => {
         image.onload = () => {

@@ -30,6 +30,7 @@ export async function publicCameraConfig(configPath = DEFAULT_CONFIG_PATH, optio
         standard: camera.matter?.standard ?? "Matter 1.5.1",
         advertise_ptz: camera.matter?.advertise_ptz ?? true,
         advertise_audio: camera.matter?.advertise_audio ?? true,
+        advertise_person_detection: camera.matter?.advertise_person_detection ?? false,
         advertise_two_way_audio: camera.matter?.advertise_two_way_audio ?? false,
         advertise_recording: camera.matter?.advertise_recording ?? false
       }
@@ -69,7 +70,8 @@ export function cameraDefinitionsFromManifest(manifest) {
         id: item?.endpoint?.id,
         name: item?.endpoint?.name ?? item?.node?.product_name?.replace(/ Matter Camera Bridge$/, "") ?? item?.endpoint?.id,
         advertise_ptz: capabilityEnabled(capabilities, "ptz", true),
-        advertise_audio: capabilityEnabled(capabilities, "live_audio", true)
+        advertise_audio: capabilityEnabled(capabilities, "live_audio", true),
+        advertise_person_detection: capabilityEnabled(capabilities, "person_detection", false)
       };
     })
     .filter(camera => camera.id)
@@ -77,7 +79,8 @@ export function cameraDefinitionsFromManifest(manifest) {
       id: String(camera.id),
       name: String(camera.name ?? camera.id),
       advertise_ptz: Boolean(camera.advertise_ptz),
-      advertise_audio: Boolean(camera.advertise_audio)
+      advertise_audio: Boolean(camera.advertise_audio),
+      advertise_person_detection: Boolean(camera.advertise_person_detection)
     }))
     .filter(Boolean);
 }
@@ -115,6 +118,7 @@ function normalizeCamera(input, existing = {}) {
       standard: "Matter 1.5.1",
       advertise_ptz: Boolean(input.matter?.advertise_ptz ?? true),
       advertise_audio: Boolean(input.matter?.advertise_audio ?? true),
+      advertise_person_detection: Boolean(input.matter?.advertise_person_detection ?? false),
       advertise_two_way_audio: Boolean(input.matter?.advertise_two_way_audio ?? false),
       advertise_recording: Boolean(input.matter?.advertise_recording ?? false)
     }

@@ -47,12 +47,15 @@ address in the add-on **Configuration** tab:
 ```yaml
 matter_tcp: true
 matter_listen_ipv4: "HOME_ASSISTANT_IP"
+whep_advertise_ip: "HOME_ASSISTANT_IP"
 matter_mdns_interface: "HOME_ASSISTANT_NETWORK_INTERFACE"
 matter_mdns_ipv6: false
 ```
 
 `matter_listen_ipv4` must be the Home Assistant host IP, not the camera IP and
-not `homeassistant.local`.
+not `homeassistant.local`. `whep_advertise_ip` should normally be the same
+value; it is the IP address embedded in WebRTC ICE candidates for live view.
+If you leave it blank, the add-on defaults it to `matter_listen_ipv4`.
 
 To find the correct IP and interface, open the Home Assistant Terminal/SSH
 add-on and run:
@@ -72,6 +75,7 @@ Use `src` as `matter_listen_ipv4` and `dev` as `matter_mdns_interface`:
 ```yaml
 matter_tcp: true
 matter_listen_ipv4: "192.168.68.110"
+whep_advertise_ip: "192.168.68.110"
 matter_mdns_interface: "enp1s0"
 matter_mdns_ipv6: false
 ```
@@ -98,6 +102,9 @@ For each camera:
 - `ONVIF Host/Port/User/Password`: used for PTZ and ONVIF stream discovery.
 - `Advanced WHEP Media Source Override`: leave blank unless the WebRTC relay
   must use a different stream than `RTSP URL`.
+- `Add Matter person presence sensor endpoint`: optional. This creates a
+  sibling Matter occupancy-style endpoint that can mirror an external person
+  detector through the bridge API. It does not run ML detection by itself.
 
 Use a plain credentialed camera RTSP URL:
 
@@ -152,6 +159,7 @@ Expected:
 - `/api/logs` includes `matter.node_started` with `network.tcp: true`,
   `listen.listeningAddressIpv4` set to the Home Assistant IP, and
   `mdns.ipv6: false`
+- WHEP health includes `advertiseIp` set to the Home Assistant IP
 
 When Matter live view works, `/api/logs` should include events like:
 
@@ -203,6 +211,7 @@ Fix it by setting:
 ```yaml
 matter_tcp: true
 matter_listen_ipv4: "HOME_ASSISTANT_IP"
+whep_advertise_ip: "HOME_ASSISTANT_IP"
 matter_mdns_interface: "INTERFACE_FROM_THE_LOG_OR_IP_ROUTE"
 matter_mdns_ipv6: false
 ```

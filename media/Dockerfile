@@ -7,6 +7,7 @@ COPY whep_relay.py .
 
 ENV WHEP_RELAY_HOST=0.0.0.0
 ENV WHEP_RELAY_PORT=8889
+ENV WHEP_ADVERTISE_IP=
 
 EXPOSE 8889
 CMD ["python", "whep_relay.py"]

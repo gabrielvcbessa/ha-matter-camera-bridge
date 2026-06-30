@@ -17,6 +17,11 @@ The Web UI camera name is exported to Matter endpoint labels. If you rename a
 camera after pairing, restart this add-on and use **Update** or **Interview** in
 the Matter Server UI so Home Assistant refreshes the endpoint metadata.
 
+If you enable the optional person presence endpoint for a camera, the add-on
+creates a sibling Matter occupancy-style endpoint. That endpoint mirrors state
+posted to the bridge API; it is a transport for person-detection results, not a
+built-in ML detector.
+
 The add-on builds locally from the repository Dockerfile during install. The
 first install can take several minutes on Home Assistant hardware because it
 installs ffmpeg, Python media dependencies, and the matter.js sidecar.
@@ -84,6 +89,11 @@ curl http://HOME_ASSISTANT_IP:8090/status
 curl http://HOME_ASSISTANT_IP:8889/health
 curl http://HOME_ASSISTANT_IP:8080/cameras/stream_to_matter_camera/probe
 ```
+
+For Matter live view, `http://HOME_ASSISTANT_IP:8889/health` should report
+`advertiseIp` as the Home Assistant IP. If it advertises a Docker-only or
+loopback address, controllers can allocate streams but hang while waiting for
+WebRTC media.
 
 The add-on log prints a compact heartbeat every `status_heartbeat_seconds`
 seconds:

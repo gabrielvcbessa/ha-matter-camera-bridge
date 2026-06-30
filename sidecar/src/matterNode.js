@@ -2,6 +2,7 @@ import { ServerNode, Endpoint } from "@matter/main/node";
 import { AggregatorEndpoint } from "@matter/main/endpoints/aggregator";
 import { NodeJsNetwork } from "@matter/nodejs";
 import { createBridgeCameraEndpoint } from "./cameraEndpoint.js";
+import { createPersonPresenceEndpoint, personPresenceEndpointId, personPresenceState } from "./personEndpoint.js";
 import { errorFields, logEvent } from "./diagnosticLog.js";
 import { SOFTWARE_VERSION } from "./version.js";
 
@@ -22,6 +23,8 @@ export class MatterNodeRuntime {
     this.started = false;
     this.error = null;
     this.cameraEndpoints = {};
+    this.personEndpoints = {};
+    this.personEndpointRefs = {};
   }
 
   setCameraIds(cameraIds) {
@@ -111,6 +114,8 @@ export class MatterNodeRuntime {
       return;
     }
     this.cameraEndpoints = {};
+    this.personEndpoints = {};
+    this.personEndpointRefs = {};
     this.aggregator = new Endpoint(AggregatorEndpoint, { id: CAMERA_AGGREGATOR_ID });
     await this.node.add(this.aggregator);
     logEvent("matter", "camera_aggregator_attached", { aggregatorId: CAMERA_AGGREGATOR_ID });
@@ -129,6 +134,33 @@ export class MatterNodeRuntime {
           lastError: null
         };
         logEvent("matter", "camera_endpoint_attached", { cameraId, cameraName: camera.name });
+        if (camera.advertise_person_detection) {
+          const personEndpoint = createPersonPresenceEndpoint(cameraId, camera.name);
+          await this.aggregator.add(personEndpoint);
+          this.personEndpointRefs[cameraId] = personEndpoint;
+          this.personEndpoints[cameraId] = {
+            attached: true,
+            id: personPresenceEndpointId(cameraId),
+            name: `${camera.name} Person Presence`,
+            active: false,
+            reason: "Bridge-backed Matter occupancy endpoint attached.",
+            lastError: null
+          };
+          logEvent("matter", "person_endpoint_attached", {
+            cameraId,
+            endpointId: personPresenceEndpointId(cameraId),
+            cameraName: camera.name
+          });
+        } else {
+          this.personEndpoints[cameraId] = {
+            attached: false,
+            id: personPresenceEndpointId(cameraId),
+            name: `${camera.name} Person Presence`,
+            active: false,
+            reason: "Person detection endpoint is disabled for this camera.",
+            lastError: null
+          };
+        }
       } catch (error) {
         this.cameraEndpoints[cameraId] = {
           attached: false,
@@ -136,9 +168,26 @@ export class MatterNodeRuntime {
           reason: "Camera endpoint attachment failed.",
           lastError: serializeError(error)
         };
-        logEvent("matter", "camera_endpoint_attach_failed", { cameraId, ...errorFields(error) }, "error");
+      logEvent("matter", "camera_endpoint_attach_failed", { cameraId, ...errorFields(error) }, "error");
       }
     }
+  }
+
+  async updatePersonPresence(cameraId, active, source = "api") {
+    const endpoint = this.personEndpointRefs[cameraId];
+    if (!endpoint || !this.personEndpoints[cameraId]?.attached) {
+      const error = new Error(`Person presence endpoint is not enabled for camera ${cameraId}`);
+      logEvent("matter", "person_presence_update_skipped", { cameraId, active: Boolean(active), source, reason: error.message }, "warn");
+      throw error;
+    }
+    await endpoint.set(personPresenceState(active));
+    this.personEndpoints[cameraId] = {
+      ...this.personEndpoints[cameraId],
+      active: Boolean(active),
+      lastError: null
+    };
+    logEvent("matter", "person_presence_updated", { cameraId, active: Boolean(active), source });
+    return this.personEndpoints[cameraId];
   }
 
   status() {
@@ -165,6 +214,7 @@ export class MatterNodeRuntime {
       discriminator: numberEnv(process.env.MATTER_DISCRIMINATOR, DEFAULT_DISCRIMINATOR),
       cameraEndpoint: primaryEndpoint(this.cameraEndpoints),
       cameraEndpoints: this.cameraEndpoints,
+      personEndpoints: this.personEndpoints,
       bridgeTopology: {
         rootDeviceType: "RootNode",
         aggregatorId: this.aggregator?.id ?? CAMERA_AGGREGATOR_ID,
@@ -172,7 +222,10 @@ export class MatterNodeRuntime {
         childDeviceType: "BridgedNode/Camera",
         bridgedCameraIds: Object.entries(this.cameraEndpoints ?? {})
           .filter(([, endpoint]) => endpoint.attached)
-          .map(([cameraId]) => cameraId)
+          .map(([cameraId]) => cameraId),
+        bridgedPersonSensorIds: Object.entries(this.personEndpoints ?? {})
+          .filter(([, endpoint]) => endpoint.attached)
+          .map(([, endpoint]) => endpoint.id)
       },
       error: this.error
     };
@@ -284,11 +337,12 @@ function normalizeCameraDefinitions(cameraDefinitions) {
           id,
           name: String(value.name ?? id).trim() || id,
           advertise_ptz: value.advertise_ptz !== false,
-          advertise_audio: value.advertise_audio !== false
+          advertise_audio: value.advertise_audio !== false,
+          advertise_person_detection: value.advertise_person_detection === true
         } : null;
       }
       const id = String(value).trim();
-      return id ? { id, name: id, advertise_ptz: true, advertise_audio: true } : null;
+      return id ? { id, name: id, advertise_ptz: true, advertise_audio: true, advertise_person_detection: false } : null;
     })
     .filter(Boolean);
   const unique = new Map();

@@ -64,6 +64,9 @@ class BridgeState:
         self.cameras = {camera.id: camera for camera in cameras}
         self.privacy_zones: dict[str, list[dict[str, object]]] = {camera.id: [] for camera in cameras}
         self.detection_zones: dict[str, list[dict[str, object]]] = {camera.id: [] for camera in cameras}
+        self.person_detection: dict[str, dict[str, object]] = {
+            camera.id: {"active": False, "source": "manual", "updated_at": None} for camera in cameras
+        }
         self.effective_rtsp_urls: dict[str, str] = {}
         self.ptz_cache: dict[str, tuple[object, list[dict[str, str]]]] = {}
         self.relay = MediaRelayManager(os.environ.get("STREAM_TO_MATTER_RELAY_DIR", "relay"))
@@ -76,6 +79,10 @@ class BridgeState:
         self.cameras = {camera.id: camera for camera in cameras}
         self.privacy_zones = {camera.id: self.privacy_zones.get(camera.id, []) for camera in cameras}
         self.detection_zones = {camera.id: self.detection_zones.get(camera.id, []) for camera in cameras}
+        self.person_detection = {
+            camera.id: self.person_detection.get(camera.id, {"active": False, "source": "manual", "updated_at": None})
+            for camera in cameras
+        }
         self.effective_rtsp_urls = {}
         self.ptz_cache = {}
         return [camera.id for camera in cameras]
@@ -177,6 +184,9 @@ def make_handler(state: BridgeState) -> type[BaseHTTPRequestHandler]:
                 return
             if tail == ["zones", "detection"]:
                 _json_response(self, 200, {"camera_id": camera.id, "zones": state.detection_zones[camera.id]})
+                return
+            if tail == ["detection", "person"]:
+                _json_response(self, 200, {"camera_id": camera.id, **state.person_detection[camera.id]})
                 return
             if tail == ["snapshot.jpg"]:
                 snapshot_dir = Path(os.environ.get("STREAM_TO_MATTER_SNAPSHOT_DIR", "snapshots"))
@@ -321,6 +331,22 @@ def make_handler(state: BridgeState) -> type[BaseHTTPRequestHandler]:
                     zones.append(zone)
                 target[camera.id] = zones
                 _json_response(self, 200, {"ok": True, "camera_id": camera.id, "zones": zones})
+                return
+            if tail == ["detection", "person"]:
+                length = int(self.headers.get("Content-Length", "0"))
+                raw_body = self.rfile.read(length) if length else b"{}"
+                try:
+                    body = json.loads(raw_body.decode("utf-8"))
+                except json.JSONDecodeError:
+                    _json_response(self, 400, {"ok": False, "error": "Body must be JSON"})
+                    return
+                active = bool(body.get("active", False))
+                state.person_detection[camera.id] = {
+                    "active": active,
+                    "source": str(body.get("source", "manual")),
+                    "updated_at": str(body.get("updated_at", "")) or None,
+                }
+                _json_response(self, 200, {"ok": True, "camera_id": camera.id, **state.person_detection[camera.id]})
                 return
             if len(tail) == 3 and tail[0] == "streams" and tail[2] in ("hls", "dash"):
                 profile_id = self._profile_id(tail[1])

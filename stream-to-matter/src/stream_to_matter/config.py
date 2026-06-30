@@ -28,8 +28,9 @@ class OnvifConfig:
 class MatterConfig:
     device_type: str = "camera"
     standard: str = "Matter 1.5.1"
-    advertise_ptz: bool = False
+    advertise_ptz: bool = True
     advertise_audio: bool = True
+    advertise_person_detection: bool = False
     advertise_two_way_audio: bool = False
     advertise_recording: bool = False
 
@@ -105,8 +106,9 @@ def load_config(path: str | os.PathLike[str] | None = None) -> list[CameraConfig
                 matter=MatterConfig(
                     device_type=str(matter_raw.get("device_type", "camera")),
                     standard=str(matter_raw.get("standard", "Matter 1.5.1")),
-                    advertise_ptz=bool(matter_raw.get("advertise_ptz", False)),
+                    advertise_ptz=bool(matter_raw.get("advertise_ptz", True)),
                     advertise_audio=bool(matter_raw.get("advertise_audio", True)),
+                    advertise_person_detection=bool(matter_raw.get("advertise_person_detection", False)),
                     advertise_two_way_audio=bool(matter_raw.get("advertise_two_way_audio", False)),
                     advertise_recording=bool(matter_raw.get("advertise_recording", False)),
                 ),

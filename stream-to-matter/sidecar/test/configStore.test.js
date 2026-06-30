@@ -184,7 +184,8 @@ test("extracts Matter PTZ and audio advertisement from manifest capabilities", a
         name: "Front Door",
         capabilities: [
           { name: "ptz", status: "enabled" },
-          { name: "live_audio", status: "disabled" }
+          { name: "live_audio", status: "disabled" },
+          { name: "person_detection", status: "enabled" }
         ]
       }
     },
@@ -193,12 +194,13 @@ test("extracts Matter PTZ and audio advertisement from manifest capabilities", a
         id: "fixed_camera",
         capabilities: [
           { name: "ptz", status: "disabled" },
-          { name: "live_audio", status: "enabled" }
+          { name: "live_audio", status: "enabled" },
+          { name: "person_detection", status: "disabled" }
         ]
       }
     }
   ]), [
-    { id: "front_door", name: "Front Door", advertise_ptz: true, advertise_audio: false },
-    { id: "fixed_camera", name: "fixed_camera", advertise_ptz: false, advertise_audio: true }
+    { id: "front_door", name: "Front Door", advertise_ptz: true, advertise_audio: false, advertise_person_detection: true },
+    { id: "fixed_camera", name: "fixed_camera", advertise_ptz: false, advertise_audio: true, advertise_person_detection: false }
   ]);
 });
