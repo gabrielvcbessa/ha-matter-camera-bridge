@@ -19,6 +19,7 @@ Use the local lab before trusting Home Assistant add-on changes. Validate agains
 - WHEP relay `/health`; `configuredSources` must include `config:<camera_id>` for config-backed cameras.
 - Matter `SnapshotStreamAllocate` -> `CaptureSnapshot` -> `SnapshotStreamDeallocate` through the HA Matter Server WebSocket API.
 - Matter live path: allocate video/audio streams, call `ProvideOffer`, apply `webrtc_callback` answer/ICE, verify RTP packets arrive, then deallocate.
+- Dashboard/API live path: run the sidecar WHEP check and confirm ICE reaches connected/completed with real RTP packets. This catches bad advertised ICE addresses before blaming Matter clusters.
 
 ## Snapshot Trap
 
@@ -27,6 +28,11 @@ Matter response payloads need headroom below 64 KB. A raw JPEG near 60 KB can st
 ## Live Feed Trap
 
 If `ProvideOffer` returns `Failure(1)`, check sidecar logs and WHEP `/health` first. A common cause is the WHEP relay not seeing the camera registry, which produces `No media source configured for <camera_id>`.
+
+If `ProvideOffer` returns session ids but the controller waits forever, inspect
+`/health` on the WHEP relay. `advertiseIp` must be reachable from the Matter
+controller; for the Home Assistant add-on it should normally be the same as
+`matter_listen_ipv4`.
 
 ## Mirrored Files
 

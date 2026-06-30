@@ -91,6 +91,59 @@ const server = http.createServer(async (request, response) => {
       return json(response, 200, { events: recentEvents(Number(url.searchParams.get("limit") ?? 80)) });
     }
 
+    const liveWhepMatch = url.pathname.match(/^\/api\/cameras\/([^/]+)\/whep$/);
+    if (request.method === "POST" && liveWhepMatch) {
+      const [, cameraId] = liveWhepMatch;
+      try {
+        const offer = await readText(request);
+        const answer = await media.whepOffer(decodeURIComponent(cameraId), offer);
+        logEvent("media", "dashboard_whep_offer", {
+          cameraId: decodeURIComponent(cameraId),
+          sdpBytes: answer.sdp.length,
+          location: answer.location
+        });
+        return text(response, 201, answer.sdp, {
+          "Content-Type": "application/sdp",
+          "Location": answer.location ?? ""
+        });
+      } catch (error) {
+        logEvent("media", "dashboard_whep_offer_failed", { cameraId: decodeURIComponent(cameraId), ...errorFields(error) }, "warn");
+        return json(response, error.status ?? 503, { ok: false, error: error.message, payload: error.payload });
+      }
+    }
+
+    const liveWhepSessionMatch = url.pathname.match(/^\/api\/cameras\/([^/]+)\/whep-session$/);
+    if (request.method === "DELETE" && liveWhepSessionMatch) {
+      const [, cameraId] = liveWhepSessionMatch;
+      await media.stopWhepSession(decodeURIComponent(cameraId), url.searchParams.get("location"));
+      logEvent("media", "dashboard_whep_stop", { cameraId: decodeURIComponent(cameraId) });
+      return json(response, 200, { ok: true });
+    }
+
+    const personDetectionMatch = url.pathname.match(/^\/api\/cameras\/([^/]+)\/detection\/person$/);
+    if (request.method === "GET" && personDetectionMatch) {
+      const [, cameraId] = personDetectionMatch;
+      return json(response, 200, await bridge.personDetection(decodeURIComponent(cameraId)));
+    }
+
+    if (request.method === "POST" && personDetectionMatch) {
+      const [, rawCameraId] = personDetectionMatch;
+      const cameraId = decodeURIComponent(rawCameraId);
+      const payload = await readJson(request);
+      const bridgeState = await bridge.updatePersonDetection(cameraId, payload);
+      let matterEndpoint = null;
+      try {
+        matterEndpoint = await matterNode.updatePersonPresence(
+          cameraId,
+          Boolean(bridgeState.active),
+          bridgeState.source ?? payload.source ?? "api"
+        );
+      } catch (error) {
+        logEvent("matter", "person_presence_mirror_failed", { cameraId, ...errorFields(error) }, "warn");
+      }
+      return json(response, 200, { ...bridgeState, matterEndpoint });
+    }
+
     if (request.method === "POST" && url.pathname === "/matter/reset-identity") {
       const payload = await readJson(request);
       let reset;
@@ -330,6 +383,7 @@ function onboardingPayload({ includeSensitive = false } = {}) {
     discriminator: includeSensitive ? nodeStatus.discriminator : null,
     cameraEndpoint: nodeStatus.cameraEndpoint,
     cameraEndpoints: nodeStatus.cameraEndpoints,
+    personEndpoints: nodeStatus.personEndpoints,
     bridgeTopology: nodeStatus.bridgeTopology,
     reason: onboardingReason(nodeStatus),
     implementedNow: [
@@ -377,6 +431,15 @@ function html(response, status, body) {
   response.end(body);
 }
 
+function text(response, status, body, headers = {}) {
+  response.writeHead(status, {
+    "Content-Type": "text/plain; charset=utf-8",
+    "Content-Length": Buffer.byteLength(body),
+    ...headers
+  });
+  response.end(body);
+}
+
 function bytesResponse(response, status, contentType, body) {
   response.writeHead(status, {
     "Content-Type": contentType,
@@ -399,7 +462,8 @@ function cameraStatusList() {
       name: manifest?.endpoint?.name ?? manifest?.node?.product_name?.replace(/ Matter Camera Bridge$/, "") ?? cameraId,
       manifest: redactSecrets(manifest),
       probe: lastCameraProbes[cameraId] ?? null,
-      endpoint: nodeStatus.cameraEndpoints?.[cameraId] ?? null
+      endpoint: nodeStatus.cameraEndpoints?.[cameraId] ?? null,
+      personEndpoint: nodeStatus.personEndpoints?.[cameraId] ?? null
     };
   });
 }
@@ -414,10 +478,14 @@ function snapshotOptionsFromUrl(url) {
 }
 
 async function readJson(request) {
+  const raw = await readText(request);
+  return raw ? JSON.parse(raw) : {};
+}
+
+async function readText(request) {
   const chunks = [];
   for await (const chunk of request) {
     chunks.push(chunk);
   }
-  const raw = Buffer.concat(chunks).toString("utf8");
-  return raw ? JSON.parse(raw) : {};
+  return Buffer.concat(chunks).toString("utf8");
 }

@@ -130,3 +130,30 @@ test("requests bridge config reload", async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test("proxies person detection state", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    const requests = [];
+    globalThis.fetch = async (url, init = {}) => {
+      requests.push({ url, init });
+      return {
+        ok: true,
+        text: async () => JSON.stringify({ ok: true, active: init.method === "POST" })
+      };
+    };
+
+    const bridge = new BridgeClient("http://127.0.0.1:8080/");
+    assert.equal((await bridge.personDetection("camera")).active, false);
+    assert.equal((await bridge.updatePersonDetection("camera", { active: true, source: "test" })).active, true);
+
+    assert.equal(requests[0].url, "http://127.0.0.1:8080/cameras/camera/detection/person");
+    assert.equal(requests[0].init.method, undefined);
+    assert.equal(requests[1].url, "http://127.0.0.1:8080/cameras/camera/detection/person");
+    assert.equal(requests[1].init.method, "POST");
+    assert.equal(requests[1].init.headers["Content-Type"], "application/json");
+    assert.equal(requests[1].init.body, JSON.stringify({ active: true, source: "test" }));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

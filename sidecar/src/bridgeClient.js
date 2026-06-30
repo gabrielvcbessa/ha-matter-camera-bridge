@@ -77,6 +77,18 @@ export class BridgeClient {
     return this.upsertZone(cameraId, "detection", zone);
   }
 
+  async personDetection(cameraId) {
+    return this.#json(`/cameras/${cameraId}/detection/person`);
+  }
+
+  async updatePersonDetection(cameraId, payload) {
+    return this.#json(`/cameras/${cameraId}/detection/person`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+  }
+
   async #json(path, init = {}) {
     const response = await fetch(`${this.baseUrl}${path}`, init);
     const text = await response.text();

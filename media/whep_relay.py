@@ -14,6 +14,9 @@ from aiortc.contrib.media import MediaPlayer
 from aiortc.exceptions import InvalidStateError
 
 
+ADVERTISE_IP_ENV_KEYS = ("WHEP_ADVERTISE_IP", "WHEP_RELAY_ADVERTISE_IP")
+
+
 @dataclass
 class WhepSession:
     peer: RTCPeerConnection
@@ -26,6 +29,34 @@ class WhepSession:
 SESSIONS: dict[str, WhepSession] = {}
 RTSP_OPEN_ATTEMPTS = 3
 RTSP_OPEN_RETRY_DELAY_SECONDS = 0.75
+
+
+def configured_advertise_ip() -> str:
+    for key in ADVERTISE_IP_ENV_KEYS:
+        value = os.environ.get(key, "").strip()
+        if value:
+            return value
+    return ""
+
+
+def configure_ice_host_address() -> None:
+    advertise_ip = configured_advertise_ip()
+    if not advertise_ip:
+        return
+
+    try:
+        import aioice.ice
+    except Exception as error:
+        log(f"advertise_ip={advertise_ip} status=configure-failed error={error}")
+        return
+
+    def get_host_addresses(use_ipv4: bool, use_ipv6: bool) -> list[str]:
+        if ":" in advertise_ip:
+            return [advertise_ip] if use_ipv6 else []
+        return [advertise_ip] if use_ipv4 else []
+
+    aioice.ice.get_host_addresses = get_host_addresses
+    log(f"advertise_ip={advertise_ip} status=configured")
 
 
 def log(message: str) -> None:
@@ -300,7 +331,15 @@ async def health(_request: web.Request) -> web.Response:
         }
         for session_id, session in SESSIONS.items()
     ]
-    return web.json_response({"ok": True, "sessions": len(SESSIONS), "configuredSources": configured, "activeSessions": sessions})
+    return web.json_response(
+        {
+            "ok": True,
+            "sessions": len(SESSIONS),
+            "configuredSources": configured,
+            "activeSessions": sessions,
+            "advertiseIp": configured_advertise_ip() or None,
+        }
+    )
 
 
 async def close_session(session: WhepSession) -> None:
@@ -338,6 +377,7 @@ def ignore_expected_ice_shutdown(_loop: asyncio.AbstractEventLoop, context: dict
 
 if __name__ == "__main__":
     asyncio.get_event_loop().set_exception_handler(ignore_expected_ice_shutdown)
+    configure_ice_host_address()
     log(
         f"starting host={os.environ.get('WHEP_RELAY_HOST', '0.0.0.0')} "
         f"port={os.environ.get('WHEP_RELAY_PORT', '8889')}"

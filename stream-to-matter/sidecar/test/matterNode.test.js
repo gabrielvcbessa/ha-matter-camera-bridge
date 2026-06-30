@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { CAMERA_AGGREGATOR_ID, matterMdnsOptions, matterServerNodeOptions } from "../src/matterNode.js";
+import { CAMERA_AGGREGATOR_ID, MatterNodeRuntime, matterMdnsOptions, matterServerNodeOptions } from "../src/matterNode.js";
 
 test("uses stable Matter operational port by default", () => {
   const previousPort = process.env.MATTER_PORT;
@@ -85,6 +85,32 @@ test("allows Matter mDNS interface and IPv6 override", () => {
 
 test("uses a stable aggregator endpoint id for bridged camera children", () => {
   assert.equal(CAMERA_AGGREGATOR_ID, "camera_bridge");
+});
+
+test("updates enabled person presence endpoint state", async () => {
+  const runtime = new MatterNodeRuntime();
+  const updates = [];
+  runtime.personEndpointRefs = {
+    camera: {
+      set: async values => updates.push(values)
+    }
+  };
+  runtime.personEndpoints = {
+    camera: {
+      attached: true,
+      id: "person_camera",
+      active: false,
+      reason: "enabled",
+      lastError: null
+    }
+  };
+
+  const status = await runtime.updatePersonPresence("camera", true, "test");
+
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].occupancySensing.occupancy.occupied, true);
+  assert.equal(status.active, true);
+  assert.equal(runtime.status().personEndpoints.camera.active, true);
 });
 
 function restoreEnv(key, value) {

@@ -26,7 +26,8 @@ const sampleStatus = {
         rtsp_url: "rtsp://127.0.0.1:8555/stm_lab",
         matter: {
           advertise_ptz: true,
-          advertise_audio: true
+          advertise_audio: true,
+          advertise_person_detection: true
         },
         onvif: {
           host: "127.0.0.1",
@@ -43,7 +44,10 @@ test("dashboard renders PTZ controls without forbidden Home Assistant copy", () 
   const html = dashboardHtml(sampleStatus);
 
   assert.match(html, /PTZ Test/);
+  assert.match(html, /Start Live Preview/);
+  assert.match(html, /Stop Preview/);
   assert.match(html, /Advertise mechanical PTZ to Matter controllers/);
+  assert.match(html, /Add Matter person presence sensor endpoint/);
   assert.match(html, /Some Matter controllers may show the camera but not expose Matter camera PTZ controls yet/);
   assert.doesNotMatch(html, /install the native integration for reliable PTZ buttons/);
 });

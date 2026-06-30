@@ -68,9 +68,14 @@ Use:
 
 ```yaml
 matter_listen_ipv4: "192.168.68.110"
+whep_advertise_ip: "192.168.68.110"
 matter_mdns_interface: "enp1s0"
 matter_mdns_ipv6: false
 ```
+
+`whep_advertise_ip` is the IP address advertised in WebRTC ICE candidates for
+Matter live view. It should normally match `matter_listen_ipv4`. If it is left
+blank, the add-on defaults it to `matter_listen_ipv4`.
 
 If Home Assistant Matter Server logs show
 `tcp://[fe80::...%enp1s0]:5540` followed by `TCP connection timeout`, the
@@ -121,6 +126,9 @@ curl http://HOME_ASSISTANT_IP:8090/api/logs?limit=80
 In `/api/logs`, `matter.node_started` should report `network.tcp: true`,
 `listen.listeningAddressIpv4` set to the Home Assistant IP, and
 `mdns.ipv6: false`.
+
+In `http://HOME_ASSISTANT_IP:8889/health`, `advertiseIp` should be the Home
+Assistant IP, not a Docker-only or loopback address.
 
 The add-on logs one compact heartbeat:
 

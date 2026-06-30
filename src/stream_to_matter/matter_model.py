@@ -22,6 +22,7 @@ def camera_capabilities(camera: CameraConfig) -> dict[str, object]:
     """
     audio_status = "enabled" if camera.matter.advertise_audio else "disabled"
     ptz_status = "enabled" if camera.matter.advertise_ptz else "disabled"
+    person_detection_status = "enabled" if camera.matter.advertise_person_detection else "disabled"
     two_way_status = "enabled" if camera.matter.advertise_two_way_audio else "disabled"
     recording_status = "enabled" if camera.matter.advertise_recording else "disabled"
 
@@ -91,6 +92,12 @@ def camera_capabilities(camera: CameraConfig) -> dict[str, object]:
             "configurable",
             f"/cameras/{camera.id}/zones/detection",
             "Bridge-side zone metadata for events and analytics.",
+        ),
+        MatterCameraCapability(
+            "person_detection",
+            person_detection_status,
+            f"/cameras/{camera.id}/detection/person",
+            "Optional bridged Occupancy Sensor endpoint for person presence events.",
         ),
         MatterCameraCapability(
             "recording",

@@ -32,6 +32,7 @@ export MATTER_DISCRIMINATOR="$(json_get "${CONFIG_PATH}" matter_discriminator)"
 export MATTER_PORT="$(json_get "${CONFIG_PATH}" matter_port)"
 export MATTER_TCP="$(json_get "${CONFIG_PATH}" matter_tcp)"
 export MATTER_LISTENING_ADDRESS_IPV4="$(json_get "${CONFIG_PATH}" matter_listen_ipv4)"
+export WHEP_ADVERTISE_IP="$(json_get "${CONFIG_PATH}" whep_advertise_ip)"
 export MATTER_MDNS_INTERFACE="$(json_get "${CONFIG_PATH}" matter_mdns_interface)"
 export MATTER_MDNS_IPV6="$(json_get "${CONFIG_PATH}" matter_mdns_ipv6)"
 export MATTER_PRODUCT_NAME="$(json_get "${CONFIG_PATH}" product_name)"
@@ -56,6 +57,14 @@ fi
 
 if [[ -n "${MATTER_LISTENING_ADDRESS_IPV4}" ]]; then
   log "Binding Matter IPv4 listener/advertisement to ${MATTER_LISTENING_ADDRESS_IPV4}"
+fi
+
+if [[ -z "${WHEP_ADVERTISE_IP}" && -n "${MATTER_LISTENING_ADDRESS_IPV4}" ]]; then
+  export WHEP_ADVERTISE_IP="${MATTER_LISTENING_ADDRESS_IPV4}"
+fi
+
+if [[ -n "${WHEP_ADVERTISE_IP}" ]]; then
+  log "Advertising WHEP/WebRTC media candidates on ${WHEP_ADVERTISE_IP}"
 fi
 
 if [[ -z "${MATTER_MDNS_IPV6}" ]]; then

@@ -251,6 +251,7 @@ export function createBridgeCameraEndpoint(cameraId, bridgeClient, mediaClient =
       scheduleRequestorAnswer(this, cameraId, request, webRtcSessionId, answer.sdp);
       return {
         webRtcSessionId,
+        videoStreamId: selectedVideoStreamId(request),
         ...legacySolicitStreamFields(request)
       };
     }
@@ -667,6 +668,11 @@ function streamIdsFromRequest(request = {}) {
   };
 }
 
+function selectedVideoStreamId(request = {}) {
+  const { videoStreams } = streamIdsFromRequest(request);
+  return videoStreams?.[0] ?? request?.videoStreamId ?? null;
+}
+
 function legacySolicitStreamFields(request) {
   const usesListFields = Array.isArray(request?.videoStreams) || Array.isArray(request?.audioStreams);
   if (usesListFields) return {};
@@ -755,7 +761,7 @@ function scheduleRequestorAnswer(behavior, cameraId, request, webRtcSessionId, s
         ...errorFields(error)
       }, "error");
     });
-  }, Number(process.env.MATTER_REQUESTOR_ANSWER_DELAY_MS ?? 250));
+  }, Number(process.env.MATTER_REQUESTOR_ANSWER_DELAY_MS ?? 80));
 }
 
 async function sendRequestorIceCandidates(behavior, cameraId, request, webRtcSessionId, sdp) {

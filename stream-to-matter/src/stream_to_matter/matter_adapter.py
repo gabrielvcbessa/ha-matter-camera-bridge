@@ -55,6 +55,7 @@ def matter_endpoint_manifest(camera: CameraConfig, base_url: str = "http://127.0
                 "ptz_stop": f"{camera_base}/ptz/stop",
                 "privacy_zones": f"{camera_base}/zones/privacy",
                 "detection_zones": f"{camera_base}/zones/detection",
+                "person_detection": f"{camera_base}/detection/person",
             },
         },
     }
