@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { cameraEndpointOptions, webRtcTransportProviderCommandFields } from "../src/cameraEndpoint.js";
+import {
+  cameraEndpointOptions,
+  matterPtzContinuousMoveCommand,
+  matterPtzStopCommand,
+  webRtcTransportProviderCommandFields
+} from "../src/cameraEndpoint.js";
 
 test("preallocates a default Matter snapshot stream for controllers that skip allocation", () => {
   const options = cameraEndpointOptions("front_door", "Front Door");
@@ -40,7 +45,7 @@ test("advertises bridged camera identity metadata", () => {
     hardwareVersion: 1,
     hardwareVersionString: "1",
     softwareVersion: 1,
-    softwareVersionString: "0.1.37",
+    softwareVersionString: "0.1.38",
     uniqueId: "stm-front_door",
     configurationVersion: 1
   });
@@ -51,6 +56,50 @@ test("advertises Matter mechanical PTZ by default", () => {
 
   assert.ok(options.cameraAvSettingsUserLevelManagement);
   assert.deepEqual(options.cameraAvSettingsUserLevelManagement.mptzPosition, { pan: 0, tilt: 0, zoom: 1 });
+});
+
+test("dashboard Matter PTZ uses short continuous movement with stop", async () => {
+  const calls = [];
+  const bridge = {
+    async ptzDirection(cameraId, direction, speed) {
+      calls.push(["direction", cameraId, direction, speed]);
+      return { ok: true };
+    },
+    async ptzStop(cameraId) {
+      calls.push(["stop", cameraId]);
+      return { ok: true };
+    }
+  };
+  const state = {};
+
+  const result = await matterPtzContinuousMoveCommand(
+    "front_door",
+    bridge,
+    { direction: "left", speed: 0.35, stopAfterMs: 0 },
+    state
+  );
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls, [
+    ["direction", "front_door", "left", 0.35],
+    ["stop", "front_door"]
+  ]);
+});
+
+test("dashboard Matter PTZ exposes explicit stop command", async () => {
+  const calls = [];
+  const bridge = {
+    async ptzStop(cameraId) {
+      calls.push(["stop", cameraId]);
+      return { ok: true };
+    }
+  };
+  const state = {};
+
+  const result = await matterPtzStopCommand("front_door", bridge, state);
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls, [["stop", "front_door"]]);
 });
 
 test("can disable Matter mechanical PTZ advertisement", () => {

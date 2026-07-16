@@ -28,6 +28,22 @@ export class MediaClient {
     };
   }
 
+  async prewarm(cameraId) {
+    if (!this.configured()) {
+      throw new Error("MEDIA_WHEP_BASE_URL is not configured");
+    }
+    const response = await fetch(`${this.baseUrl}/${encodeURIComponent(cameraId)}/prewarm`, {
+      method: "POST"
+    });
+    const payload = await parseJsonResponse(response);
+    if (!response.ok) {
+      const error = new Error(`WHEP prewarm request failed: ${response.status}`);
+      error.payload = payload;
+      throw error;
+    }
+    return payload;
+  }
+
   async providerOffer(cameraId) {
     if (!this.configured()) {
       throw new Error("MEDIA_WHEP_BASE_URL is not configured");
@@ -101,6 +117,20 @@ export class MediaClient {
     });
   }
 
+  async whepCandidatesSdpFrag(cameraId, sessionLocation, sdpFrag) {
+    if (!sessionLocation || !sdpFrag) {
+      return;
+    }
+    await fetch(resolveSessionUrl(this.baseUrl, cameraId, sessionLocation), {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/trickle-ice-sdpfrag",
+        "If-Match": "*"
+      },
+      body: sdpFrag
+    });
+  }
+
   async stopWhepSession(cameraId, sessionLocation) {
     if (!sessionLocation) {
       return;
@@ -132,7 +162,7 @@ function candidatesToSdpFrag(candidates = []) {
   return candidates
     .map(candidate => {
       const mid = candidate.sdpMid ?? "0";
-      const index = candidate.sdpmLineIndex ?? 0;
+      const index = candidate.sdpMLineIndex ?? 0;
       return `a=mid:${mid}\r\na=m-line-index:${index}\r\na=${candidate.candidate}\r\n`;
     })
     .join("");

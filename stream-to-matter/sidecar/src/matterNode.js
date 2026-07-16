@@ -46,13 +46,13 @@ export class MatterNodeRuntime {
       logEvent("matter", "camera_ids_changed_after_start", {
         currentCameraIds: this.cameraIds,
         nextCameraIds,
-        note: "Restart the add-on for new or removed cameras to become Matter endpoints."
+        note: "Restart this add-on from the Home Assistant add-on page for new or removed cameras to become Matter endpoints."
       }, "warn");
     } else if (metadataChanged) {
       logEvent("matter", "camera_metadata_changed_after_start", {
         currentCameras: this.cameraDefinitions,
         nextCameras: nextCameraDefinitions,
-        note: "Restart the add-on for updated camera names to be reflected in Matter bridged device metadata."
+        note: "Restart this add-on from the Home Assistant add-on page for updated camera names to be reflected in Matter bridged device metadata."
       }, "warn");
     }
   }

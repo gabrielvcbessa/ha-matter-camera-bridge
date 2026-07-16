@@ -1,0 +1,110 @@
+name: stm-local-matter-lab
+
+services:
+  rtsp:
+    image: bluenviron/mediamtx:latest
+    container_name: stm-local-rtsp
+    network_mode: host
+    environment:
+      MTX_RTSPADDRESS: :28555
+      MTX_RTSPTRANSPORTS: tcp
+      MTX_HLS: "false"
+      MTX_RTMP: "false"
+      MTX_WEBRTC: "false"
+      MTX_SRT: "false"
+      MTX_MOQ: "false"
+    restart: unless-stopped
+
+  stream-source:
+    build:
+      context: ./stream-to-matter
+    container_name: stm-local-stream-source
+    network_mode: host
+    entrypoint: ["ffmpeg"]
+    command:
+      - -hide_banner
+      - -loglevel
+      - warning
+      - -re
+      - -f
+      - lavfi
+      - -i
+      - testsrc=size=1280x720:rate=10
+      - -an
+      - -c:v
+      - libx264
+      - -preset
+      - ultrafast
+      - -tune
+      - zerolatency
+      - -pix_fmt
+      - yuv420p
+      - -f
+      - rtsp
+      - -rtsp_transport
+      - tcp
+      - rtsp://127.0.0.1:28555/stm_lab
+    depends_on:
+      - rtsp
+    restart: unless-stopped
+
+  onvif:
+    image: python:3.12-slim
+    container_name: stm-local-onvif
+    network_mode: host
+    environment:
+      ONVIF_FIXTURE_PORT: "18082"
+      ONVIF_FIXTURE_PUBLIC_HOST: 127.0.0.1
+      ONVIF_FIXTURE_RTSP_URI: rtsp://127.0.0.1:28555/stm_lab
+    volumes:
+      - ./tests/lab_onvif_fixture.py:/fixture.py:ro
+    command: ["python", "/fixture.py"]
+    restart: unless-stopped
+
+  bridge:
+    build:
+      context: ./stream-to-matter
+    container_name: stm-local-bridge
+    network_mode: host
+    environment:
+      STREAM_TO_MATTER_PORT: "18080"
+      MATTER_SIDECAR_PORT: "18090"
+      WHEP_RELAY_PORT: "18889"
+      BRIDGE_URL: http://127.0.0.1:18080
+      MEDIA_WHEP_BASE_URL: http://127.0.0.1:18889
+      WHEP_ADVERTISE_IP: 127.0.0.1
+      MATTER_MDNS_INTERFACE: eth0
+      MATTER_MDNS_IPV6: "false"
+    volumes:
+      - ./.local-matter-lab/bridge:/data
+    depends_on:
+      - rtsp
+      - stream-source
+      - onvif
+    restart: unless-stopped
+
+  matter-server:
+    image: ${MATTER_SERVER_IMAGE:-homeassistant/aarch64-addon-matter-server:9.0.3}
+    container_name: stm-local-matter-server
+    network_mode: host
+    entrypoint:
+      - node
+      - --enable-source-maps
+      - /app/node_modules/matter-server/dist/esm/MatterServer.js
+    volumes:
+      - ./.local-matter-lab/matter-server:/data
+    command:
+      - --storage-path
+      - /data
+      - --port
+      - "15580"
+      - --log-level
+      - info
+      - --primary-interface
+      - eth0
+      - --fabricid
+      - "2"
+      - --vendorid
+      - "4939"
+      - --enable-test-net-dcl
+    restart: unless-stopped

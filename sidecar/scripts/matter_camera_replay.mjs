@@ -33,7 +33,7 @@ const node = await ServerNode.create({
     hardwareVersion: 1,
     hardwareVersionString: "1",
     softwareVersion: 1,
-    softwareVersionString: "0.1.37"
+    softwareVersionString: "0.1.38"
   },
   network: {
     port: 0,
@@ -67,7 +67,9 @@ try {
   }
 
   console.log(`[replay] commissioned peer ${peer.identity ?? "(stored peer)"}`);
-  const endpointId = Number(process.env.MATTER_CAMERA_ENDPOINT ?? 1);
+  const endpointId = process.env.MATTER_CAMERA_ENDPOINT
+    ? Number(process.env.MATTER_CAMERA_ENDPOINT)
+    : findCameraEndpointId(peer);
   console.log(`[replay] camera endpoint ${endpointId}`);
 
   if (mode === "live") {
@@ -177,6 +179,33 @@ function firstCommandField(chunks, field) {
     if (value !== undefined) return value;
   }
   return undefined;
+}
+
+function findCameraEndpointId(peer) {
+  const found = findEndpointWithBehavior(peer, "cameraAvStreamManagement");
+  if (!found?.number) {
+    throw new Error("No camera endpoint with cameraAvStreamManagement was found on the commissioned peer.");
+  }
+  return Number(found.number);
+}
+
+function findEndpointWithBehavior(endpoint, behaviorId, seen = new Set()) {
+  if (!endpoint || seen.has(endpoint)) {
+    return null;
+  }
+  seen.add(endpoint);
+
+  const supported = endpoint.behaviors?.supported ?? endpoint.behaviors ?? {};
+  if (Object.prototype.hasOwnProperty.call(supported, behaviorId)) {
+    return endpoint;
+  }
+
+  for (const part of endpoint.parts ?? []) {
+    const found = findEndpointWithBehavior(part, behaviorId, seen);
+    if (found) return found;
+  }
+
+  return null;
 }
 
 function cloneWithBytes(value) {

@@ -30,7 +30,7 @@ export function personPresenceState(active) {
 
 export function personPresenceEndpointOptions(cameraId, cameraName = cameraId) {
   const id = personPresenceEndpointId(cameraId);
-  const name = `${cameraName} Person Presence`;
+  const name = matterNodeLabel(`${cameraName} Person Presence`);
   return {
     id,
     bridgedDeviceBasicInformation: {
@@ -64,4 +64,11 @@ function bridgedUniqueId(rawId) {
   if (candidate.length <= 32) return candidate;
   const hash = createHash("sha256").update(raw).digest("hex").slice(0, 8);
   return `${candidate.slice(0, 23)}-${hash}`;
+}
+
+function matterNodeLabel(rawLabel) {
+  const label = String(rawLabel);
+  if (label.length <= 32) return label;
+  const hash = createHash("sha256").update(label).digest("hex").slice(0, 6);
+  return `${label.slice(0, 25)}-${hash}`;
 }

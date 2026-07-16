@@ -1,7 +1,17 @@
 import http from "node:http";
 import { Logger } from "@matter/general";
+import QRCode from "qrcode";
 import { BridgeClient } from "./bridgeClient.js";
 import { cameraDefinitionsFromManifest, cameraIdsFromManifest, publicCameraConfig, saveCameraConfig } from "./configStore.js";
+import {
+  matterCaptureSnapshotCommand,
+  matterEndWhepSessionCommand,
+  matterProvideWhepOfferCommand,
+  matterPtzContinuousMoveCommand,
+  matterPtzRelativeMoveCommand,
+  matterPtzStopCommand,
+  matterPtzStatusCommand
+} from "./cameraEndpoint.js";
 import { dashboardHtml } from "./dashboard.js";
 import { errorFields, logEvent, recentEvents, redactSecrets } from "./diagnosticLog.js";
 import { readMatterResetRequest, scheduleMatterIdentityReset } from "./identityReset.js";
@@ -10,6 +20,7 @@ import { matterActivitySnapshot } from "./matterActivity.js";
 import { inspectMatterCameraSupport } from "./matterCapabilities.js";
 import { MatterNodeRuntime } from "./matterNode.js";
 import { cleanupStaleMatterStorageLock } from "./storageLock.js";
+import { SOFTWARE_VERSION } from "./version.js";
 
 const PORT = Number(process.env.MATTER_SIDECAR_PORT ?? 8090);
 const BRIDGE_URL = process.env.BRIDGE_URL ?? "http://stream-to-matter:8080";
@@ -30,6 +41,7 @@ let lastCameraProbes = {};
 let lastMediaHealth = null;
 let cameraDefinitions = cameraIds.map(id => ({ id, name: id }));
 let startupError = null;
+const dashboardMatterStates = new Map();
 
 async function refreshBridgeState() {
   lastBridgeHealth = await bridge.health();
@@ -91,6 +103,154 @@ const server = http.createServer(async (request, response) => {
       return json(response, 200, { events: recentEvents(Number(url.searchParams.get("limit") ?? 80)) });
     }
 
+    const matterSnapshotMatch = url.pathname.match(/^\/api\/matter\/cameras\/([^/]+)\/snapshot\.jpg$/);
+    if (request.method === "GET" && matterSnapshotMatch) {
+      const [, rawCameraId] = matterSnapshotMatch;
+      const cameraId = decodeURIComponent(rawCameraId);
+      try {
+        const result = await matterCaptureSnapshotCommand(cameraId, bridge, snapshotMatterRequestFromUrl(url), matterStateForCamera(cameraId));
+        return bytesResponse(response, 200, "image/jpeg", Buffer.from(result.data), {
+          "X-Stream-To-Matter-Path": "matter-camera-av-stream-management"
+        });
+      } catch (error) {
+        return json(response, error.status ?? 503, {
+          ok: false,
+          path: "matter-camera-av-stream-management",
+          error: error.message,
+          payload: error.payload
+        });
+      }
+    }
+
+    const matterLiveWhepMatch = url.pathname.match(/^\/api\/matter\/cameras\/([^/]+)\/whep$/);
+    if (request.method === "POST" && matterLiveWhepMatch) {
+      const [, rawCameraId] = matterLiveWhepMatch;
+      const cameraId = decodeURIComponent(rawCameraId);
+      try {
+        const offer = await readText(request);
+        const answer = await matterProvideWhepOfferCommand(cameraId, media, {
+          sdp: offer,
+          streamUsage: 3
+        }, matterStateForCamera(cameraId), dashboardMatterContext());
+        return text(response, 201, answer.sdp, {
+          "Content-Type": "application/sdp",
+          "Location": answer.location ?? "",
+          "X-Matter-Webrtc-Session-Id": String(answer.webRtcSessionId ?? ""),
+          "X-Stream-To-Matter-Path": "matter-web-rtc-transport-provider"
+        });
+      } catch (error) {
+        return json(response, error.status ?? 503, {
+          ok: false,
+          path: "matter-web-rtc-transport-provider",
+          error: error.message,
+          payload: error.payload
+        });
+      }
+    }
+
+    const matterPrewarmMatch = url.pathname.match(/^\/api\/matter\/cameras\/([^/]+)\/prewarm$/);
+    if (request.method === "POST" && matterPrewarmMatch) {
+      const [, rawCameraId] = matterPrewarmMatch;
+      const cameraId = decodeURIComponent(rawCameraId);
+      try {
+        const payload = await media.prewarm(cameraId);
+        logEvent("media", "dashboard_prewarm", { cameraId, video: payload.video, audio: payload.audio });
+        return json(response, 200, { ...payload, path: "matter-web-rtc-transport-provider" });
+      } catch (error) {
+        logEvent("media", "dashboard_prewarm_failed", { cameraId, ...errorFields(error) }, "warn");
+        return json(response, error.status ?? 503, {
+          ok: false,
+          path: "matter-web-rtc-transport-provider",
+          error: error.message,
+          payload: error.payload
+        });
+      }
+    }
+
+    const matterLiveWhepSessionMatch = url.pathname.match(/^\/api\/matter\/cameras\/([^/]+)\/whep-session$/);
+    if (request.method === "PATCH" && matterLiveWhepSessionMatch) {
+      const [, rawCameraId] = matterLiveWhepSessionMatch;
+      const cameraId = decodeURIComponent(rawCameraId);
+      try {
+        await media.whepCandidatesSdpFrag(cameraId, url.searchParams.get("location"), await readText(request));
+        return json(response, 200, { ok: true, path: "matter-web-rtc-transport-provider" });
+      } catch (error) {
+        return json(response, error.status ?? 503, {
+          ok: false,
+          path: "matter-web-rtc-transport-provider",
+          error: error.message,
+          payload: error.payload
+        });
+      }
+    }
+
+    if (request.method === "DELETE" && matterLiveWhepSessionMatch) {
+      const [, rawCameraId] = matterLiveWhepSessionMatch;
+      const cameraId = decodeURIComponent(rawCameraId);
+      await matterEndWhepSessionCommand(cameraId, media, {
+        webRtcSessionId: Number(url.searchParams.get("webRtcSessionId") ?? 0) || undefined,
+        location: url.searchParams.get("location")
+      }, matterStateForCamera(cameraId));
+      return json(response, 200, { ok: true, path: "matter-web-rtc-transport-provider" });
+    }
+
+    const matterPtzMatch = url.pathname.match(/^\/api\/matter\/cameras\/([^/]+)\/ptz\/([^/]+)$/);
+    if (request.method === "POST" && matterPtzMatch) {
+      const [, rawCameraId, rawDirection] = matterPtzMatch;
+      const cameraId = decodeURIComponent(rawCameraId);
+      const direction = decodeURIComponent(rawDirection);
+      try {
+        if (direction === "stop") {
+          const payload = await matterPtzStopCommand(cameraId, bridge, matterStateForCamera(cameraId));
+          return json(response, 200, { ...payload, path: "matter-camera-av-settings-user-level-management" });
+        }
+        if (url.searchParams.get("mode") === "continuous") {
+          const payload = await matterPtzContinuousMoveCommand(
+            cameraId,
+            bridge,
+            {
+              direction,
+              speed: Number(url.searchParams.get("speed") ?? "0.25"),
+              stopAfterMs: Number(url.searchParams.get("stopAfterMs") ?? "350")
+            },
+            matterStateForCamera(cameraId)
+          );
+          return json(response, 200, { ...payload, path: "matter-camera-av-settings-user-level-management" });
+        }
+        const payload = await matterPtzRelativeMoveCommand(
+          cameraId,
+          bridge,
+          ptzDirectionToMatterRequest(direction, Number(url.searchParams.get("speed") ?? "0.25")),
+          matterStateForCamera(cameraId)
+        );
+        return json(response, 200, { ...payload, path: "matter-camera-av-settings-user-level-management" });
+      } catch (error) {
+        return json(response, error.status ?? 503, {
+          ok: false,
+          path: "matter-camera-av-settings-user-level-management",
+          error: error.message,
+          payload: error.payload
+        });
+      }
+    }
+
+    const matterPtzStatusMatch = url.pathname.match(/^\/api\/matter\/cameras\/([^/]+)\/ptz\/status$/);
+    if (request.method === "GET" && matterPtzStatusMatch) {
+      const [, rawCameraId] = matterPtzStatusMatch;
+      const cameraId = decodeURIComponent(rawCameraId);
+      try {
+        const payload = await matterPtzStatusCommand(cameraId, bridge);
+        return json(response, 200, { ...payload, path: "matter-camera-av-settings-user-level-management" });
+      } catch (error) {
+        return json(response, error.status ?? 503, {
+          ok: false,
+          path: "matter-camera-av-settings-user-level-management",
+          error: error.message,
+          payload: error.payload
+        });
+      }
+    }
+
     const liveWhepMatch = url.pathname.match(/^\/api\/cameras\/([^/]+)\/whep$/);
     if (request.method === "POST" && liveWhepMatch) {
       const [, cameraId] = liveWhepMatch;
@@ -112,7 +272,27 @@ const server = http.createServer(async (request, response) => {
       }
     }
 
+    const livePrewarmMatch = url.pathname.match(/^\/api\/cameras\/([^/]+)\/prewarm$/);
+    if (request.method === "POST" && livePrewarmMatch) {
+      const [, cameraId] = livePrewarmMatch;
+      try {
+        const payload = await media.prewarm(decodeURIComponent(cameraId));
+        logEvent("media", "dashboard_prewarm", { cameraId: decodeURIComponent(cameraId), video: payload.video, audio: payload.audio });
+        return json(response, 200, payload);
+      } catch (error) {
+        logEvent("media", "dashboard_prewarm_failed", { cameraId: decodeURIComponent(cameraId), ...errorFields(error) }, "warn");
+        return json(response, error.status ?? 503, { ok: false, error: error.message, payload: error.payload });
+      }
+    }
+
     const liveWhepSessionMatch = url.pathname.match(/^\/api\/cameras\/([^/]+)\/whep-session$/);
+    if (request.method === "PATCH" && liveWhepSessionMatch) {
+      const [, cameraId] = liveWhepSessionMatch;
+      await media.whepCandidatesSdpFrag(decodeURIComponent(cameraId), url.searchParams.get("location"), await readText(request));
+      logEvent("media", "dashboard_whep_candidates", { cameraId: decodeURIComponent(cameraId) });
+      return json(response, 200, { ok: true });
+    }
+
     if (request.method === "DELETE" && liveWhepSessionMatch) {
       const [, cameraId] = liveWhepSessionMatch;
       await media.stopWhepSession(decodeURIComponent(cameraId), url.searchParams.get("location"));
@@ -157,7 +337,7 @@ const server = http.createServer(async (request, response) => {
         ok: true,
         reset,
         restartRequired: true,
-        message: "Matter identity reset has been scheduled. Restart the add-on to rotate credentials and clear Matter storage."
+        message: "Matter identity reset has been scheduled. Restart this add-on from the Home Assistant add-on page to rotate credentials and clear Matter storage."
       });
     }
 
@@ -167,17 +347,40 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === "PUT" && url.pathname === "/api/cameras") {
       const payload = await readJson(request);
-      const saved = await saveCameraConfig(payload);
-      const bridgeReload = await bridge.reloadConfig().catch(errorPayload);
+      let saved;
+      try {
+        saved = await saveCameraConfig(payload);
+      } catch (error) {
+        logEvent("config", "cameras_save_rejected", errorFields(error), "warn");
+        return json(response, 400, { ok: false, error: error.message, payload: error.payload });
+      }
+      const cameraIdsSaved = saved.cameras.map(camera => camera.id);
+      const emptyRegistry = cameraIdsSaved.length === 0;
+      const restartRequired = emptyRegistry || Boolean(payload.restartRequired);
+      const bridgeReload = emptyRegistry
+        ? { ok: true, skipped: true, reason: "No cameras configured. Restart this add-on from the Home Assistant add-on page to remove existing Matter camera endpoints." }
+        : await bridge.reloadConfig().catch(errorPayload);
       logEvent("config", "cameras_saved", {
-        cameraIds: saved.cameras.map(camera => camera.id),
+        cameraIds: cameraIdsSaved,
+        restartRequired,
         bridgeReloadOk: Boolean(bridgeReload?.ok)
       });
-      await refreshBridgeState().catch(error => {
-        startupError = { message: error.message, payload: error.payload };
-        logEvent("bridge", "refresh_after_save_failed", errorFields(error), "error");
+      if (!emptyRegistry) {
+        await refreshBridgeState().catch(error => {
+          startupError = { message: error.message, payload: error.payload };
+          logEvent("bridge", "refresh_after_save_failed", errorFields(error), "error");
+        });
+      }
+      return json(response, 200, {
+        ...saved,
+        bridgeReload,
+        restartRequired,
+        message: emptyRegistry
+          ? "Saved with no cameras configured. Restart this add-on from the Home Assistant add-on page to remove Matter camera endpoints."
+          : restartRequired
+            ? "Saved. Restart this add-on from the Home Assistant add-on page so Matter endpoint changes are rebuilt."
+          : "Saved."
       });
-      return json(response, 200, { ...saved, bridgeReload });
     }
 
     const snapshotMatch = url.pathname.match(/^\/api\/cameras\/([^/]+)\/snapshot\.jpg$/);
@@ -209,6 +412,27 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "GET" && url.pathname === "/bridge/manifest") {
       await refreshBridgeState();
       return json(response, 200, redactSecrets(lastManifest));
+    }
+
+    if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/matter/onboarding.svg") {
+      const payload = onboardingPayload({ includeSensitive: true });
+      if (!payload.qrPairingCode) return text(response, 404, "Matter QR code is not ready.");
+      const body = await QRCode.toString(payload.qrPairingCode, {
+        type: "svg",
+        margin: 2,
+        width: 240,
+        color: {
+          dark: "#17212b",
+          light: "#ffffff"
+        }
+      });
+      response.writeHead(200, {
+        "Content-Type": "image/svg+xml; charset=utf-8",
+        "Content-Length": Buffer.byteLength(body),
+        "Cache-Control": "no-store"
+      });
+      if (request.method === "HEAD") return response.end();
+      return response.end(body);
     }
 
     if (request.method === "GET" && url.pathname === "/matter/onboarding") {
@@ -277,7 +501,7 @@ const server = http.createServer(async (request, response) => {
 
     return json(response, 404, { ok: false, error: "not found" });
   } catch (error) {
-    return json(response, 500, { ok: false, error: error.message, payload: error.payload });
+    return json(response, 500, errorPayload(error));
   }
 });
 
@@ -303,6 +527,8 @@ async function statusPayload({ includeSensitive = false } = {}) {
   const matterReset = await readMatterResetRequest();
   return {
     ok: startupError === null,
+    appVersion: SOFTWARE_VERSION,
+    sidecarPort: PORT,
     mode: COMMISSIONING_MODE,
     bridgeUrl: BRIDGE_URL,
     mediaWhepConfigured: media.configured(),
@@ -366,7 +592,14 @@ async function logHeartbeat() {
 }
 
 function errorPayload(error) {
-  return { ok: false, error: error.message, payload: error.payload };
+  return {
+    ok: false,
+    error: error.message,
+    code: error.code,
+    path: error.path,
+    syscall: error.syscall,
+    payload: error.payload
+  };
 }
 
 function onboardingPayload({ includeSensitive = false } = {}) {
@@ -375,6 +608,8 @@ function onboardingPayload({ includeSensitive = false } = {}) {
     mode: COMMISSIONING_MODE,
     started: nodeStatus.started,
     pairable: nodeStatus.pairable,
+    commissioned: Boolean(nodeStatus.commissioned),
+    commissionedFabrics: Number(nodeStatus.commissionedFabrics ?? 0),
     credentialSource: process.env.MATTER_CREDENTIAL_SOURCE ?? "unknown",
     manualPairingCode: includeSensitive ? nodeStatus.manualPairingCode : null,
     qrPairingCode: includeSensitive ? nodeStatus.qrPairingCode : null,
@@ -440,11 +675,12 @@ function text(response, status, body, headers = {}) {
   response.end(body);
 }
 
-function bytesResponse(response, status, contentType, body) {
+function bytesResponse(response, status, contentType, body, headers = {}) {
   response.writeHead(status, {
     "Content-Type": contentType,
     "Content-Length": body.byteLength,
-    "Cache-Control": "no-store"
+    "Cache-Control": "no-store",
+    ...headers
   });
   response.end(body);
 }
@@ -475,6 +711,50 @@ function snapshotOptionsFromUrl(url) {
     quality: url.searchParams.get("quality"),
     max_bytes: url.searchParams.get("max_bytes")
   };
+}
+
+function snapshotMatterRequestFromUrl(url) {
+  const width = Number(url.searchParams.get("width") ?? 640) || 640;
+  const height = Number(url.searchParams.get("height") ?? 360) || 360;
+  return {
+    requestedResolution: { width, height }
+  };
+}
+
+function matterStateForCamera(cameraId) {
+  if (!dashboardMatterStates.has(cameraId)) {
+    dashboardMatterStates.set(cameraId, {
+      currentSessions: [],
+      mptzPosition: { pan: 0, tilt: 0, zoom: 1 }
+    });
+  }
+  return dashboardMatterStates.get(cameraId);
+}
+
+function dashboardMatterContext() {
+  return {
+    session: {
+      peerNodeId: BigInt(0)
+    },
+    fabric: 1
+  };
+}
+
+function ptzDirectionToMatterRequest(direction, speed = 0.25) {
+  const delta = Math.max(Math.min(Number(speed) || 0.25, 1), 0.05);
+  const map = {
+    up: { tiltDelta: delta },
+    down: { tiltDelta: -delta },
+    left: { panDelta: -delta },
+    right: { panDelta: delta },
+    "up-left": { panDelta: -delta, tiltDelta: delta },
+    "up-right": { panDelta: delta, tiltDelta: delta },
+    "down-left": { panDelta: -delta, tiltDelta: -delta },
+    "down-right": { panDelta: delta, tiltDelta: -delta },
+    "zoom-in": { zoomDelta: delta },
+    "zoom-out": { zoomDelta: -delta }
+  };
+  return map[direction] ?? {};
 }
 
 async function readJson(request) {

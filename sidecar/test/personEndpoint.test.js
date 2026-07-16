@@ -17,3 +17,10 @@ test("builds a Matter occupancy state patch", () => {
   assert.equal(personPresenceState(true).occupancySensing.occupancy.occupied, true);
   assert.equal(personPresenceState(false).occupancySensing.occupancy.occupied, false);
 });
+
+test("limits person presence node labels to the Matter 32 character constraint", () => {
+  const options = personPresenceEndpointOptions("lab_camera", "Local Matter Lab Camera");
+
+  assert.ok(options.bridgedDeviceBasicInformation.nodeLabel.length <= 32);
+  assert.match(options.bridgedDeviceBasicInformation.nodeLabel, /^Local Matter Lab Camera P-[0-9a-f]{6}$/);
+});

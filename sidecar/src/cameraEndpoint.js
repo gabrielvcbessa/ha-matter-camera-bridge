@@ -33,6 +33,168 @@ export function webRtcTransportProviderCommandFields(commandName) {
     ?.map(field => field.propertyName) ?? [];
 }
 
+export async function matterCaptureSnapshotCommand(cameraId, bridgeClient, request = {}, state = {}) {
+  const snapshotStreamId = request?.snapshotStreamId ?? null;
+  const stream = snapshotStreamForRequest(state, snapshotStreamId);
+  const resolution = normalizeResolution(request?.requestedResolution ?? stream?.maxResolution, stream?.maxResolution ?? fullSnapshotResolution());
+  recordMatterCommand(cameraId, "CameraAvStreamManagement", "captureSnapshot", { snapshotStreamId, resolution });
+  logEvent("matter-camera", "capture_snapshot_start", { cameraId, snapshotStreamId, resolution });
+  let bytes;
+  try {
+    bytes = await bridgeClient.snapshotBytes(cameraId, "jpeg", {
+      width: resolution.width,
+      height: resolution.height,
+      quality: stream?.quality ?? 80,
+      max_bytes: MATTER_SNAPSHOT_RESPONSE_BUDGET_BYTES
+    });
+  } catch (error) {
+    logEvent("matter-camera", "capture_snapshot_failed", { cameraId, snapshotStreamId, ...errorFields(error) }, "error");
+    throw error;
+  }
+  logEvent("matter-camera", "capture_snapshot_complete", { cameraId, snapshotStreamId, bytes: bytes.byteLength ?? bytes.length ?? null });
+  return {
+    data: bytes,
+    imageCodec: CameraAvStreamManagement.ImageCodec.Jpeg,
+    resolution
+  };
+}
+
+export async function matterProvideWhepOfferCommand(cameraId, mediaClient, request = {}, state = {}, context = {}) {
+  const webRtcSessionId = request?.webRtcSessionId ?? nextWebRtcSessionId++;
+  recordMatterCommand(cameraId, "WebRtcTransportProvider", "provideOffer", {
+    webRtcSessionId,
+    sdpBytes: String(request?.sdp ?? "").length,
+    whepConfigured: mediaClient?.configured?.() ?? false,
+    ...summarizeWebRtcRequest(request, context)
+  });
+  if (!mediaClient?.configured?.()) {
+    logEvent("matter-camera", "provide_offer_no_whep", { cameraId, webRtcSessionId }, "warn");
+    markWebRtcSession(cameraId, webRtcSessionId, "no-whep");
+    webRtcSessions.set(webRtcSessionId, {});
+    upsertWebRtcSession(state, webRtcSessionFromRequest(webRtcSessionId, request, context));
+    return {
+      webRtcSessionId,
+      videoStreamId: selectedVideoStreamId(request),
+      sdp: "",
+      location: null
+    };
+  }
+  logEvent("matter-camera", "provide_offer_forward_whep", {
+    cameraId,
+    webRtcSessionId,
+    sdpBytes: String(request?.sdp ?? "").length,
+    ...summarizeWebRtcRequest(request, context)
+  });
+  let answer;
+  try {
+    answer = await mediaClient.whepOffer(cameraId, request?.sdp ?? "");
+  } catch (error) {
+    cleanupAllocatedStreamsAfterFailedOffer(state, request);
+    webRtcSessions.delete(webRtcSessionId);
+    markWebRtcSession(cameraId, webRtcSessionId, "failed", errorFields(error));
+    logEvent("matter-camera", "provide_offer_failed", { cameraId, webRtcSessionId, ...errorFields(error) }, "error");
+    throw error;
+  }
+  webRtcSessions.set(webRtcSessionId, {
+    location: answer.location,
+    sdp: answer.sdp
+  });
+  upsertWebRtcSession(state, webRtcSessionFromRequest(webRtcSessionId, request, context));
+  markWebRtcSession(cameraId, webRtcSessionId, "answered", { location: answer.location });
+  logEvent("matter-camera", "provide_offer_answer_ready", { cameraId, webRtcSessionId, sdpBytes: String(answer.sdp ?? "").length });
+  return {
+    webRtcSessionId,
+    videoStreamId: selectedVideoStreamId(request),
+    sdp: answer.sdp,
+    location: answer.location
+  };
+}
+
+export async function matterEndWhepSessionCommand(cameraId, mediaClient, request = {}, state = {}) {
+  const webRtcSessionId = request?.webRtcSessionId;
+  const session = webRtcSessions.get(webRtcSessionId) ?? {};
+  const location = request?.location ?? session?.location ?? null;
+  recordMatterCommand(cameraId, "WebRtcTransportProvider", "endSession", { webRtcSessionId });
+  logEvent("matter-camera", "end_session", { cameraId, webRtcSessionId });
+  await safeBridgeCall("end_session_stop_whep", cameraId, { webRtcSessionId, location }, () =>
+    mediaClient?.stopWhepSession?.(cameraId, location)
+  );
+  if (webRtcSessionId != null) webRtcSessions.delete(webRtcSessionId);
+  state.currentSessions = (state.currentSessions ?? []).filter(session => session.id !== webRtcSessionId);
+  markWebRtcSession(cameraId, webRtcSessionId, "ended");
+}
+
+export async function matterPtzRelativeMoveCommand(cameraId, bridgeClient, request = {}, state = {}) {
+  recordMatterCommand(cameraId, "CameraAvSettingsUserLevelManagement", "mptzRelativeMove", {
+    panDelta: request?.panDelta ?? 0,
+    tiltDelta: request?.tiltDelta ?? 0,
+    zoomDelta: request?.zoomDelta ?? 0
+  });
+  const panDelta = request?.panDelta ?? 0;
+  const tiltDelta = request?.tiltDelta ?? 0;
+  const zoomDelta = request?.zoomDelta ?? 0;
+  const current = state.mptzPosition ?? { pan: 0, tilt: 0, zoom: 1 };
+  const pan = clamp((current.pan ?? 0) + panDelta, -180, 180);
+  const tilt = clamp((current.tilt ?? 0) + tiltDelta, -90, 90);
+  const zoom = clamp((current.zoom ?? 1) + zoomDelta, 1, 100);
+  state.movementState = CameraAvSettingsUserLevelManagement.PhysicalMovement.Moving;
+  try {
+    await safeBridgeCall("ptz_relative", cameraId, { panDelta, tiltDelta, zoomDelta, pan, tilt, zoom }, () =>
+      bridgeClient.ptzRelative(cameraId, scalePan(panDelta), scaleTilt(tiltDelta), scaleZoomDelta(zoomDelta))
+    );
+    state.mptzPosition = { pan, tilt, zoom };
+    return { ok: true, mptzPosition: state.mptzPosition };
+  } finally {
+    state.movementState = CameraAvSettingsUserLevelManagement.PhysicalMovement.Idle;
+  }
+}
+
+export async function matterPtzContinuousMoveCommand(cameraId, bridgeClient, request = {}, state = {}) {
+  const direction = request?.direction ?? "stop";
+  const speed = clamp(request?.speed ?? 0.25, 0.05, 1);
+  const stopAfterMs = Number(request?.stopAfterMs ?? 350);
+  recordMatterCommand(cameraId, "CameraAvSettingsUserLevelManagement", "mptzContinuousMove", {
+    direction,
+    speed,
+    stopAfterMs
+  });
+  state.movementState = CameraAvSettingsUserLevelManagement.PhysicalMovement.Moving;
+  try {
+    const move = await bridgeClient.ptzDirection(cameraId, direction, speed);
+    let stopped = null;
+    if (stopAfterMs >= 0) {
+      await new Promise(resolve => setTimeout(resolve, stopAfterMs));
+      stopped = await bridgeClient.ptzStop(cameraId);
+      state.movementState = CameraAvSettingsUserLevelManagement.PhysicalMovement.Idle;
+    }
+    logEvent("matter-camera", "ptz_continuous_move_ok", { cameraId, direction, speed, stopAfterMs });
+    return { ok: true, move, stopped, movementState: state.movementState };
+  } catch (error) {
+    state.movementState = CameraAvSettingsUserLevelManagement.PhysicalMovement.Idle;
+    logEvent("matter-camera", "ptz_continuous_move_failed", { cameraId, direction, speed, stopAfterMs, ...errorFields(error) }, "error");
+    throw error;
+  }
+}
+
+export async function matterPtzStopCommand(cameraId, bridgeClient, state = {}) {
+  recordMatterCommand(cameraId, "CameraAvSettingsUserLevelManagement", "mptzStop");
+  try {
+    const stopped = await bridgeClient.ptzStop(cameraId);
+    state.movementState = CameraAvSettingsUserLevelManagement.PhysicalMovement.Idle;
+    logEvent("matter-camera", "ptz_stop_ok", { cameraId });
+    return { ok: true, stopped, movementState: state.movementState };
+  } catch (error) {
+    logEvent("matter-camera", "ptz_stop_failed", { cameraId, ...errorFields(error) }, "error");
+    throw error;
+  }
+}
+
+export async function matterPtzStatusCommand(cameraId, bridgeClient) {
+  recordMatterCommand(cameraId, "CameraAvSettingsUserLevelManagement", "ptzStatusCheck");
+  logEvent("matter-camera", "ptz_status_check", { cameraId });
+  return bridgeClient.ptzStatus(cameraId);
+}
+
 export function createBridgeCameraEndpoint(cameraId, bridgeClient, mediaClient = null, cameraName = cameraId, options = {}) {
   const advertisePtz = options.advertisePtz !== false;
   const CameraAvStreamManagementWithImageControl =
@@ -148,29 +310,7 @@ export function createBridgeCameraEndpoint(cameraId, bridgeClient, mediaClient =
     }
 
     async captureSnapshot(request) {
-      const snapshotStreamId = request?.snapshotStreamId ?? null;
-      const stream = snapshotStreamForRequest(this.state, snapshotStreamId);
-      const resolution = normalizeResolution(request?.requestedResolution ?? stream?.maxResolution, stream?.maxResolution ?? fullSnapshotResolution());
-      recordMatterCommand(cameraId, "CameraAvStreamManagement", "captureSnapshot", { snapshotStreamId, resolution });
-      logEvent("matter-camera", "capture_snapshot_start", { cameraId, snapshotStreamId, resolution });
-      let bytes;
-      try {
-        bytes = await bridgeClient.snapshotBytes(cameraId, "jpeg", {
-          width: resolution.width,
-          height: resolution.height,
-          quality: stream?.quality ?? 80,
-          max_bytes: MATTER_SNAPSHOT_RESPONSE_BUDGET_BYTES
-        });
-      } catch (error) {
-        logEvent("matter-camera", "capture_snapshot_failed", { cameraId, snapshotStreamId, ...errorFields(error) }, "error");
-        throw error;
-      }
-      logEvent("matter-camera", "capture_snapshot_complete", { cameraId, snapshotStreamId, bytes: bytes.byteLength ?? bytes.length ?? null });
-      return {
-        data: bytes,
-        imageCodec: CameraAvStreamManagement.ImageCodec.Jpeg,
-        resolution
-      };
+      return matterCaptureSnapshotCommand(cameraId, bridgeClient, request, this.state);
     }
 
     async setStreamPriorities(_request) {
@@ -208,46 +348,8 @@ export function createBridgeCameraEndpoint(cameraId, bridgeClient, mediaClient =
     }
 
     async provideOffer(request) {
-      const webRtcSessionId = request?.webRtcSessionId ?? nextWebRtcSessionId++;
-      recordMatterCommand(cameraId, "WebRtcTransportProvider", "provideOffer", {
-        webRtcSessionId,
-        sdpBytes: String(request?.sdp ?? "").length,
-        whepConfigured: mediaClient?.configured?.() ?? false,
-        ...summarizeWebRtcRequest(request, this.context)
-      });
-      if (!mediaClient?.configured?.()) {
-        logEvent("matter-camera", "provide_offer_no_whep", { cameraId, webRtcSessionId }, "warn");
-        markWebRtcSession(cameraId, webRtcSessionId, "no-whep");
-        webRtcSessions.set(webRtcSessionId, {});
-        upsertWebRtcSession(this.state, webRtcSessionFromRequest(webRtcSessionId, request, this.context));
-        return {
-          webRtcSessionId,
-          ...legacySolicitStreamFields(request)
-        };
-      }
-      logEvent("matter-camera", "provide_offer_forward_whep", {
-        cameraId,
-        webRtcSessionId,
-        sdpBytes: String(request?.sdp ?? "").length,
-        ...summarizeWebRtcRequest(request, this.context)
-      });
-      let answer;
-      try {
-        answer = await mediaClient.whepOffer(cameraId, request?.sdp ?? "");
-      } catch (error) {
-        cleanupAllocatedStreamsAfterFailedOffer(this.state, request);
-        webRtcSessions.delete(webRtcSessionId);
-        markWebRtcSession(cameraId, webRtcSessionId, "failed", errorFields(error));
-        logEvent("matter-camera", "provide_offer_failed", { cameraId, webRtcSessionId, ...errorFields(error) }, "error");
-        throw error;
-      }
-      webRtcSessions.set(webRtcSessionId, {
-        location: answer.location,
-        sdp: answer.sdp
-      });
-      upsertWebRtcSession(this.state, webRtcSessionFromRequest(webRtcSessionId, request, this.context));
-      markWebRtcSession(cameraId, webRtcSessionId, "answered", { location: answer.location });
-      logEvent("matter-camera", "provide_offer_answer_ready", { cameraId, webRtcSessionId, sdpBytes: String(answer.sdp ?? "").length });
+      const answer = await matterProvideWhepOfferCommand(cameraId, mediaClient, request, this.state, this.context);
+      const { webRtcSessionId } = answer;
       scheduleRequestorAnswer(this, cameraId, request, webRtcSessionId, answer.sdp);
       return {
         webRtcSessionId,
@@ -300,16 +402,7 @@ export function createBridgeCameraEndpoint(cameraId, bridgeClient, mediaClient =
     }
 
     async endSession(request) {
-      const webRtcSessionId = request?.webRtcSessionId;
-      const session = webRtcSessions.get(webRtcSessionId);
-      recordMatterCommand(cameraId, "WebRtcTransportProvider", "endSession", { webRtcSessionId });
-      logEvent("matter-camera", "end_session", { cameraId, webRtcSessionId });
-      await safeBridgeCall("end_session_stop_whep", cameraId, { webRtcSessionId, location: session?.location ?? null }, () =>
-        mediaClient?.stopWhepSession?.(cameraId, session?.location)
-      );
-      webRtcSessions.delete(webRtcSessionId);
-      this.state.currentSessions = (this.state.currentSessions ?? []).filter(session => session.id !== webRtcSessionId);
-      markWebRtcSession(cameraId, webRtcSessionId, "ended");
+      await matterEndWhepSessionCommand(cameraId, mediaClient, request, this.state);
     }
   }
 
@@ -356,27 +449,7 @@ export function createBridgeCameraEndpoint(cameraId, bridgeClient, mediaClient =
     }
 
     async mptzRelativeMove(request) {
-      recordMatterCommand(cameraId, "CameraAvSettingsUserLevelManagement", "mptzRelativeMove", {
-        panDelta: request?.panDelta ?? 0,
-        tiltDelta: request?.tiltDelta ?? 0,
-        zoomDelta: request?.zoomDelta ?? 0
-      });
-      const panDelta = request?.panDelta ?? 0;
-      const tiltDelta = request?.tiltDelta ?? 0;
-      const zoomDelta = request?.zoomDelta ?? 0;
-      const current = this.state.mptzPosition ?? { pan: 0, tilt: 0, zoom: 1 };
-      const pan = clamp((current.pan ?? 0) + panDelta, -180, 180);
-      const tilt = clamp((current.tilt ?? 0) + tiltDelta, -90, 90);
-      const zoom = clamp((current.zoom ?? 1) + zoomDelta, 1, 100);
-      this.state.movementState = CameraAvSettingsUserLevelManagement.PhysicalMovement.Moving;
-      try {
-        await safeBridgeCall("ptz_relative", cameraId, { panDelta, tiltDelta, zoomDelta, pan, tilt, zoom }, () =>
-          bridgeClient.ptzRelative(cameraId, scalePan(panDelta), scaleTilt(tiltDelta), scaleZoomDelta(zoomDelta))
-        );
-        this.state.mptzPosition = { pan, tilt, zoom };
-      } finally {
-        this.state.movementState = CameraAvSettingsUserLevelManagement.PhysicalMovement.Idle;
-      }
+      await matterPtzRelativeMoveCommand(cameraId, bridgeClient, request, this.state);
     }
   }
 

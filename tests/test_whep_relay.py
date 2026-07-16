@@ -65,6 +65,20 @@ class WhepRelayTests(unittest.TestCase):
             ):
                 self.assertEqual(self.relay.configured_source_names(), ["MEDIA_SOURCE", "config:front"])
 
+    def test_config_source_resolves_environment_placeholders(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "cameras.json"
+            config_path.write_text(
+                json.dumps({"cameras": [{"id": "front", "media_source": "rtsp://user:${CAMERA_PASSWORD}@front/stream"}]}),
+                encoding="utf-8",
+            )
+            with patch.dict(
+                os.environ,
+                {"STREAM_TO_MATTER_CONFIG": str(config_path), "CAMERA_PASSWORD": "secret"},
+                clear=True,
+            ):
+                self.assertEqual(self.relay.source_for("front"), "rtsp://user:secret@front/stream")
+
     def test_create_app_registers_health_route(self):
         app = self.relay.create_app()
         self.assertTrue(any(route.resource.canonical == "/health" for route in app.router.routes()))

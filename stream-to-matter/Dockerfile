@@ -1,6 +1,6 @@
 FROM node:22-bookworm-slim
 
-ARG BUILD_VERSION=0.1.35
+ARG BUILD_VERSION=0.1.38
 ARG BUILD_ARCH=amd64
 
 LABEL \
@@ -19,17 +19,20 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY src ./src
-COPY config ./config
-COPY media ./media
-COPY sidecar ./sidecar
-COPY run.sh /run.sh
+COPY media/requirements.txt ./media/requirements.txt
+COPY sidecar/package.json sidecar/package-lock.json ./sidecar/
 
 RUN python3 -m venv /opt/stream-to-matter \
   && /opt/stream-to-matter/bin/python -m pip install --no-cache-dir -r /app/media/requirements.txt
 
 RUN cd /app/sidecar \
   && npm install --omit=dev --no-audit --no-fund
+
+COPY src ./src
+COPY config ./config
+COPY media ./media
+COPY sidecar ./sidecar
+COPY run.sh /run.sh
 
 RUN chmod a+x /run.sh
 

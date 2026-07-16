@@ -113,6 +113,27 @@ test("saves multiple cameras while preserving per-camera secrets", async () => {
   assert.equal(saved.cameras[1].onvif.password, "garage-password");
 });
 
+test("allows saving an empty camera list after deleting the last camera", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "stream-to-matter-config-"));
+  const configPath = path.join(dir, "cameras.json");
+  await fs.writeFile(configPath, JSON.stringify({
+    cameras: [
+      {
+        id: "front_door",
+        name: "Front Door",
+        rtsp_url: "rtsp://front/stream",
+        onvif: { host: "front.local", port: 80, user: "front", password: "front-password" }
+      }
+    ]
+  }), "utf8");
+
+  const saved = await saveCameraConfig({ cameras: [] }, configPath);
+  assert.deepEqual(saved.cameras, []);
+
+  const raw = JSON.parse(await fs.readFile(configPath, "utf8"));
+  assert.deepEqual(raw, { cameras: [] });
+});
+
 test("rejects duplicate camera ids", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "stream-to-matter-config-"));
   const configPath = path.join(dir, "cameras.json");

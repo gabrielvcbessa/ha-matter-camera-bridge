@@ -102,6 +102,19 @@ class ConfigAndModelTests(unittest.TestCase):
         uri = add_rtsp_credentials("rtsp://192.168.68.59:554/av_stream/ch0", "rtsp", "camera-password")
         self.assertEqual(uri, "rtsp://rtsp:camera-password@192.168.68.59:554/av_stream/ch0")
 
+    def test_replaces_rtsp_credentials_for_onvif_fallback_uri(self):
+        uri = add_rtsp_credentials(
+            "rtsp://old:wrong@192.168.68.59:554/av_stream/ch0",
+            "rtsp",
+            "camera-password",
+            replace_existing=True,
+        )
+        self.assertEqual(uri, "rtsp://rtsp:camera-password@192.168.68.59:554/av_stream/ch0")
+
+    def test_does_not_add_empty_rtsp_credentials(self):
+        uri = add_rtsp_credentials("rtsp://127.0.0.1:28555/stm_lab", "", "", replace_existing=True)
+        self.assertEqual(uri, "rtsp://127.0.0.1:28555/stm_lab")
+
     def test_redacts_rtsp_credentials(self):
         uri = redact_url("rtsp://rtsp:camera-password@192.168.68.59:554/av_stream/ch0")
         self.assertEqual(uri, "rtsp://rtsp:***@192.168.68.59:554/av_stream/ch0")

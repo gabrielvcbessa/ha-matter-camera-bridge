@@ -60,9 +60,11 @@ def probe_rtsp(rtsp_url: str, timeout_seconds: int = 10) -> dict[str, Any]:
     }
 
 
-def add_rtsp_credentials(rtsp_url: str, user: str, password: str) -> str:
+def add_rtsp_credentials(rtsp_url: str, user: str, password: str, replace_existing: bool = False) -> str:
     parsed = urlsplit(rtsp_url)
-    if parsed.username or parsed.scheme != "rtsp":
+    if not user and not password:
+        return rtsp_url
+    if parsed.scheme != "rtsp" or (parsed.username and not replace_existing):
         return rtsp_url
 
     userinfo = f"{quote(user)}:{quote(password)}@"

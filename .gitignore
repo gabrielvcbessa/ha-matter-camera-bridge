@@ -7,6 +7,7 @@ sidecar/node_modules/
 .DS_Store
 .env
 .lab/
+.local-matter-lab/
 snapshots/
 relay/
 matter-storage/

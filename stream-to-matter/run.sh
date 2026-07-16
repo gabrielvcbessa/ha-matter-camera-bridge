@@ -10,6 +10,12 @@ MATTER_STORAGE_DIR="${MATTER_STORAGE_ROOT}/node0"
 DEFAULT_MATTER_PASSCODE=20202021
 DEFAULT_MATTER_DISCRIMINATOR=3840
 
+BRIDGE_PORT="${STREAM_TO_MATTER_PORT:-8080}"
+SIDECAR_PORT="${MATTER_SIDECAR_PORT:-8090}"
+WHEP_PORT="${WHEP_RELAY_PORT:-8889}"
+BRIDGE_HEALTH_URL="http://127.0.0.1:${BRIDGE_PORT}/health"
+BRIDGE_MANIFEST_URL="http://127.0.0.1:${BRIDGE_PORT}/matter/manifest"
+
 log() {
   echo "[stream-to-matter] $*"
 }
@@ -238,23 +244,24 @@ cleanup() {
 }
 trap cleanup TERM INT
 
-log "Launching bridge on http://0.0.0.0:8080"
+log "Launching bridge on http://0.0.0.0:${BRIDGE_PORT}"
 python3 -m stream_to_matter.server &
 bridge_pid=$!
 
-log "Launching WHEP relay on http://0.0.0.0:8889"
+log "Launching WHEP relay on http://0.0.0.0:${WHEP_PORT}"
 python3 /app/media/whep_relay.py &
 whep_pid=$!
 
 log "Waiting for bridge health"
 bridge_ready=0
 for _ in $(seq 1 30); do
-  if python3 - <<'PY'
+  if BRIDGE_HEALTH_URL="${BRIDGE_HEALTH_URL}" python3 - <<'PY'
+import os
 import sys
 import urllib.request
 
 try:
-    urllib.request.urlopen("http://127.0.0.1:8080/health", timeout=1).read()
+    urllib.request.urlopen(os.environ["BRIDGE_HEALTH_URL"], timeout=1).read()
 except Exception:
     sys.exit(1)
 PY
@@ -273,13 +280,14 @@ fi
 log "Waiting for bridge Matter manifest"
 manifest_ready=0
 for _ in $(seq 1 30); do
-  if python3 - <<'PY'
+  if BRIDGE_MANIFEST_URL="${BRIDGE_MANIFEST_URL}" python3 - <<'PY'
 import json
+import os
 import sys
 import urllib.request
 
 try:
-    payload = urllib.request.urlopen("http://127.0.0.1:8080/matter/manifest", timeout=1).read()
+    payload = urllib.request.urlopen(os.environ["BRIDGE_MANIFEST_URL"], timeout=1).read()
     manifest = json.loads(payload)
     if isinstance(manifest, list) and len(manifest) > 0:
         sys.exit(0)
@@ -300,7 +308,7 @@ else
 fi
 
 cd /app/sidecar
-log "Launching Matter sidecar on http://0.0.0.0:8090"
+log "Launching Matter sidecar on http://0.0.0.0:${SIDECAR_PORT}"
 npm start &
 sidecar_pid=$!
 

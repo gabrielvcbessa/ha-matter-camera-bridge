@@ -37,3 +37,29 @@ test("posts Matter SDP offers to camera WHEP endpoint", async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test("prewarms camera WHEP source", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    let requestUrl = null;
+    let requestInit = null;
+    globalThis.fetch = async (url, init) => {
+      requestUrl = url;
+      requestInit = init;
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ ok: true, video: true, audio: false })
+      };
+    };
+
+    const media = new MediaClient("http://127.0.0.1:8889/");
+    const response = await media.prewarm("camera");
+
+    assert.equal(requestUrl, "http://127.0.0.1:8889/camera/prewarm");
+    assert.equal(requestInit.method, "POST");
+    assert.deepEqual(response, { ok: true, video: true, audio: false });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

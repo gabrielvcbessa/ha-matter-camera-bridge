@@ -231,6 +231,7 @@ or non-Home Assistant installs.
 
 Developer and architecture notes:
 
+- [docs/simplification-map.md](docs/simplification-map.md) — improvement map and one-command local Matter lab
 - [docs/deployment-guides.md](docs/deployment-guides.md)
 - [docs/home-assistant-native-integration.md](docs/home-assistant-native-integration.md)
 - [docs/matter-sidecar.md](docs/matter-sidecar.md)

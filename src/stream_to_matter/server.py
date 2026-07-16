@@ -258,7 +258,7 @@ def make_handler(state: BridgeState) -> type[BaseHTTPRequestHandler]:
                 uri = uri_payload.get("uri")
                 if not isinstance(uri, str):
                     return camera.rtsp_url
-                authed_url = add_rtsp_credentials(uri, camera.onvif.user, camera.onvif.password)
+                authed_url = add_rtsp_credentials(uri, camera.onvif.user, camera.onvif.password, replace_existing=True)
                 state.effective_rtsp_urls[camera.id] = authed_url
                 return authed_url
             except Exception:
@@ -289,7 +289,7 @@ def make_handler(state: BridgeState) -> type[BaseHTTPRequestHandler]:
                         uri_payload = get_stream_uri(camera.onvif, services.media, profiles[0]["token"])
                         uri = uri_payload.get("uri")
                         if isinstance(uri, str):
-                            authed_uri = add_rtsp_credentials(uri, camera.onvif.user, camera.onvif.password)
+                            authed_uri = add_rtsp_credentials(uri, camera.onvif.user, camera.onvif.password, replace_existing=True)
                             fallback = probe_rtsp(authed_uri)
                             fallback["source"] = "onvif_stream_uri"
                             fallback["uri"] = uri

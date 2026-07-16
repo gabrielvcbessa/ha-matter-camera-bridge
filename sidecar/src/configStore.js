@@ -42,9 +42,6 @@ export async function saveCameraConfig(nextPayload, configPath = DEFAULT_CONFIG_
   const current = await readCameraConfig(configPath).catch(() => ({ cameras: [] }));
   const currentById = new Map((current.cameras ?? []).map(camera => [String(camera.id), camera]));
   const cameras = (nextPayload.cameras ?? []).map(input => normalizeCamera(input, currentById.get(String(input.id))));
-  if (!cameras.length) {
-    throw new Error("At least one camera is required.");
-  }
   const ids = new Set();
   for (const camera of cameras) {
     if (ids.has(camera.id)) {
