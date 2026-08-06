@@ -1,12 +1,95 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { Status, StreamUsage } from "@matter/types";
 
 import {
+  assertLiveViewUsage,
   cameraEndpointOptions,
+  matterCaptureSnapshotCommand,
+  matterEndWhepSessionCommand,
+  matterProvideWhepOfferCommand,
   matterPtzContinuousMoveCommand,
   matterPtzStopCommand,
   webRtcTransportProviderCommandFields
 } from "../src/cameraEndpoint.js";
+
+test("isolates WebRTC sessions by Matter fabric and peer", async () => {
+  const stopped = [];
+  let offer = 0;
+  const media = {
+    configured: () => true,
+    async whepOffer() {
+      offer += 1;
+      return { sdp: `answer-${offer}`, location: `/session-${offer}`, etag: `etag-${offer}` };
+    },
+    async stopWhepSession(_cameraId, location) {
+      stopped.push(location);
+    }
+  };
+  const request = { webRtcSessionId: 7, sdp: "offer", streamUsage: StreamUsage.LiveView };
+  const contextOne = { fabric: 1, session: { peerNodeId: 10n } };
+  const contextTwo = { fabric: 2, session: { peerNodeId: 20n } };
+
+  await matterProvideWhepOfferCommand("session_isolation", media, request, {}, contextOne);
+  await matterProvideWhepOfferCommand("session_isolation", media, request, {}, contextTwo);
+  await matterEndWhepSessionCommand("session_isolation", media, request, {}, contextOne);
+  await matterEndWhepSessionCommand("session_isolation", media, request, {}, contextTwo);
+
+  assert.deepEqual(stopped, ["/session-1", "/session-2"]);
+});
+
+test("advertises only the implemented live-view stream usage", () => {
+  const options = cameraEndpointOptions("front_door", "Front Door");
+
+  assert.deepEqual(options.cameraAvStreamManagement.supportedStreamUsages, [StreamUsage.LiveView]);
+  assert.deepEqual(options.cameraAvStreamManagement.streamUsagePriorities, [StreamUsage.LiveView]);
+  assert.equal(assertLiveViewUsage(undefined, "ProvideOffer"), StreamUsage.LiveView);
+  assert.throws(
+    () => assertLiveViewUsage(StreamUsage.Recording, "ProvideOffer"),
+    error => error.code === Status.ConstraintError && /Push AV Stream Transport/.test(error.message)
+  );
+});
+
+test("Matter snapshots use the shared media relay before the direct RTSP bridge", async () => {
+  let bridgeCalls = 0;
+  const bridge = {
+    async snapshotBytes() {
+      bridgeCalls += 1;
+      throw new Error("direct RTSP snapshot should not be opened");
+    }
+  };
+  const media = {
+    configured: () => true,
+    async snapshotBytes(cameraId, options) {
+      assert.equal(cameraId, "front_door");
+      assert.deepEqual(options, {
+        width: 1280,
+        height: 720,
+        quality: 85,
+        max_bytes: 56_000
+      });
+      return Uint8Array.from({ length: 128 }, (_, index) => index % 256);
+    }
+  };
+  const state = {
+    allocatedSnapshotStreams: [{
+      snapshotStreamId: 7,
+      maxResolution: { width: 1280, height: 720 },
+      quality: 85
+    }]
+  };
+
+  const result = await matterCaptureSnapshotCommand(
+    "front_door",
+    bridge,
+    { snapshotStreamId: 7, requestedResolution: { width: 1280, height: 720 } },
+    state,
+    media
+  );
+
+  assert.equal(result.data.length, 128);
+  assert.equal(bridgeCalls, 0);
+});
 
 test("preallocates a default Matter snapshot stream for controllers that skip allocation", () => {
   const options = cameraEndpointOptions("front_door", "Front Door");
@@ -106,6 +189,14 @@ test("can disable Matter mechanical PTZ advertisement", () => {
   const options = cameraEndpointOptions("fixed_camera", "Fixed Camera", { advertisePtz: false });
 
   assert.equal(options.cameraAvSettingsUserLevelManagement, undefined);
+});
+
+test("does not advertise microphone capabilities for video-only cameras", () => {
+  const options = cameraEndpointOptions("fixed_camera", "Fixed Camera", { advertiseAudio: false });
+
+  assert.equal(options.cameraAvStreamManagement.microphoneCapabilities, undefined);
+  assert.equal(options.cameraAvStreamManagement.allocatedAudioStreams, undefined);
+  assert.equal(options.cameraAvStreamManagement.microphoneMuted, undefined);
 });
 
 test("adds a hash suffix to long bridged camera unique ids", () => {

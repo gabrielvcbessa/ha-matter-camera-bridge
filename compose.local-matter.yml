@@ -72,7 +72,7 @@ services:
       WHEP_RELAY_PORT: "18889"
       BRIDGE_URL: http://127.0.0.1:18080
       MEDIA_WHEP_BASE_URL: http://127.0.0.1:18889
-      WHEP_ADVERTISE_IP: 127.0.0.1
+      WHEP_ADVERTISE_IP: ${WHEP_ADVERTISE_IP:-}
       MATTER_MDNS_INTERFACE: eth0
       MATTER_MDNS_IPV6: "false"
     volumes:
@@ -84,7 +84,7 @@ services:
     restart: unless-stopped
 
   matter-server:
-    image: ${MATTER_SERVER_IMAGE:-homeassistant/aarch64-addon-matter-server:9.0.3}
+    image: ${MATTER_SERVER_IMAGE:-homeassistant/aarch64-addon-matter-server:9.1.1}
     container_name: stm-local-matter-server
     network_mode: host
     entrypoint:

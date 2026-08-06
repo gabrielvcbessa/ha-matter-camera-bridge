@@ -1,7 +1,7 @@
 import unittest
 
 from stream_to_matter.config import OnvifConfig
-from stream_to_matter.onvif import OnvifServices, _text_by_local_name
+from stream_to_matter.onvif import OnvifServices, _rebase_service_url, _text_by_local_name
 
 
 class OnvifTests(unittest.TestCase):
@@ -35,6 +35,22 @@ class OnvifTests(unittest.TestCase):
             ptz="http://camera/onvif/ptz_service",
         )
         self.assertIsNotNone(services.ptz)
+
+    def test_rebases_discovered_service_to_configured_authority(self):
+        config = OnvifConfig(
+            host="host.docker.internal",
+            port=29080,
+            user="rtsp",
+            password="camera-password",
+        )
+        self.assertEqual(
+            _rebase_service_url(config, "http://192.168.68.59:80/onvif/ptz_service?profile=1"),
+            "http://host.docker.internal:29080/onvif/ptz_service?profile=1",
+        )
+
+    def test_rebase_preserves_missing_service(self):
+        config = OnvifConfig(host="camera", port=80, user="rtsp", password="camera-password")
+        self.assertIsNone(_rebase_service_url(config, None))
 
     def test_parses_stream_uri_by_local_name(self):
         xml = """<Envelope><Body><GetStreamUriResponse><MediaUri>

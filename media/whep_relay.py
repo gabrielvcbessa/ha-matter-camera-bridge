@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from urllib.parse import quote
 
 from aiohttp import web
+from aiohttp import ClientSession
 from aiortc import RTCSessionDescription, RTCPeerConnection
 from aiortc.contrib.media import MediaPlayer, MediaRelay
 from aiortc.exceptions import InvalidStateError
@@ -18,17 +19,20 @@ from aiortc.sdp import candidate_from_sdp
 
 ADVERTISE_IP_ENV_KEYS = ("WHEP_ADVERTISE_IP", "WHEP_RELAY_ADVERTISE_IP")
 ENV_PATTERN = re.compile(r"\$\{([A-Z0-9_]+)(?::-(.*?))?\}")
+RTSP_CREDENTIAL_PATTERN = re.compile(r"(rtsps?://[^:/@\s]+:)([^@\s]+)(@)", re.IGNORECASE)
 
 
 @dataclass
 class WhepSession:
-    peer: RTCPeerConnection
+    peer: RTCPeerConnection | None
     player: MediaPlayer | None
     camera_id: str
     mode: str
     created_at: str
     source_key: str | None = None
     cleanup_task: asyncio.Task | None = None
+    upstream_location: str | None = None
+    upstream_etag: str | None = None
 
 
 @dataclass
@@ -45,9 +49,15 @@ WARM_SOURCES: dict[str, WarmSource] = {}
 MEDIA_RELAY = MediaRelay()
 RTSP_OPEN_ATTEMPTS = 3
 RTSP_OPEN_RETRY_DELAY_SECONDS = 0.75
+GO2RTC_OPEN_ATTEMPTS = 3
+GO2RTC_OPEN_RETRY_DELAY_SECONDS = 1.0
+GO2RTC_SNAPSHOT_TIMEOUT_SECONDS = float(os.environ.get("GO2RTC_SNAPSHOT_TIMEOUT_SECONDS", "8"))
 SESSION_TTL_SECONDS = int(os.environ.get("WHEP_SESSION_TTL_SECONDS", "90"))
 FAILED_SESSION_GRACE_SECONDS = int(os.environ.get("WHEP_FAILED_SESSION_GRACE_SECONDS", "8"))
 WARM_SOURCE_TTL_SECONDS = int(os.environ.get("WHEP_WARM_SOURCE_TTL_SECONDS", "75"))
+GO2RTC_BASE_URL = os.environ.get("GO2RTC_BASE_URL", "").rstrip("/")
+GO2RTC_STREAMS: dict[str, str] = {}
+GO2RTC_LOCKS: dict[str, asyncio.Lock] = {}
 
 
 def configured_advertise_ip() -> str:
@@ -80,7 +90,11 @@ def configure_ice_host_address() -> None:
 
 def log(message: str) -> None:
     timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    print(f"[whep-relay] {timestamp} {message}", flush=True)
+    print(f"[whep-relay] {timestamp} {redact_sensitive_text(message)}", flush=True)
+
+
+def redact_sensitive_text(value: object) -> str:
+    return RTSP_CREDENTIAL_PATTERN.sub(r"\1***\3", str(value))
 
 
 def resolve_env(value):
@@ -107,6 +121,28 @@ def source_for(camera_id: str) -> str | None:
     env_name = f"{camera_id.upper().replace('-', '_')}_MEDIA_SOURCE"
     configured = source_from_config(camera_id)
     return configured or os.environ.get(env_name) or os.environ.get("CAMERA_MEDIA_SOURCE") or os.environ.get("MEDIA_SOURCE")
+
+
+def camera_advertises_audio(camera_id: str) -> bool:
+    config_path = os.environ.get("STREAM_TO_MATTER_CONFIG", "/data/cameras.json")
+    try:
+        with open(config_path, "r", encoding="utf-8") as handle:
+            payload = resolve_env(json.load(handle))
+    except (OSError, ValueError):
+        return True
+    for camera in payload.get("cameras", []):
+        if str(camera.get("id", "")) == camera_id:
+            return bool(camera.get("matter", {}).get("advertise_audio", True))
+    return True
+
+
+def normalized_go2rtc_source(source: str, camera_id: str = "") -> str:
+    if source.startswith("ffmpeg:"):
+        return source
+    if source.startswith("rtsp://"):
+        audio = "#audio=opus" if camera_advertises_audio(camera_id) else ""
+        return f"ffmpeg:{source}#tcp#video=h264{audio}"
+    return source
 
 
 def source_from_config(camera_id: str) -> str | None:
@@ -181,6 +217,249 @@ def describe_sdp(sdp: str) -> dict[str, object]:
     }
 
 
+def go2rtc_configured() -> bool:
+    return bool(GO2RTC_BASE_URL)
+
+
+def go2rtc_stream_name(camera_id: str) -> str:
+    normalized = re.sub(r"[^A-Za-z0-9_-]+", "_", camera_id).strip("_")
+    return f"{normalized or 'camera'}_webrtc"
+
+
+def go2rtc_session_url(location: str) -> str:
+    if location.startswith("http://") or location.startswith("https://"):
+        return location
+    return f"{GO2RTC_BASE_URL}{location if location.startswith('/') else '/' + location}"
+
+
+async def go2rtc_request(method: str, path: str, **kwargs):
+    timeout = kwargs.pop("timeout", 30)
+    url = path if path.startswith("http://") or path.startswith("https://") else f"{GO2RTC_BASE_URL}{path}"
+    async with ClientSession() as session:
+        async with session.request(method, url, timeout=timeout, **kwargs) as response:
+            body = await response.read()
+            return response.status, dict(response.headers), body
+
+
+async def ensure_go2rtc_stream(camera_id: str, source: str) -> str:
+    source = normalized_go2rtc_source(source, camera_id)
+    stream_name = go2rtc_stream_name(camera_id)
+    if GO2RTC_STREAMS.get(camera_id) == source:
+        return stream_name
+
+    params = f"?src={quote(source, safe='')}&name={quote(stream_name, safe='')}"
+    status, _headers, body = await go2rtc_request("PUT", f"/api/streams{params}", timeout=15)
+    matches = await go2rtc_stream_matches(stream_name, source)
+    if not matches and await go2rtc_stream_exists(stream_name):
+        await go2rtc_request("DELETE", f"/api/streams?src={quote(stream_name, safe='')}", timeout=10)
+        status, _headers, body = await go2rtc_request("PUT", f"/api/streams{params}", timeout=15)
+        matches = await go2rtc_stream_matches(stream_name, source)
+    if not matches:
+        error = redact_sensitive_text(body.decode("utf-8", errors="replace"))
+        log(f"go2rtc camera={camera_id} status=register-failed code={status} error={error}")
+        raise RuntimeError(f"go2rtc stream registration failed: {status} {error}")
+
+    GO2RTC_STREAMS[camera_id] = source
+    log(f"go2rtc camera={camera_id} status=registered stream={stream_name}")
+    return stream_name
+
+
+async def recycle_go2rtc_stream(camera_id: str, source: str) -> str:
+    stream_name = go2rtc_stream_name(camera_id)
+    await go2rtc_request("DELETE", f"/api/streams?src={quote(stream_name, safe='')}", timeout=10)
+    GO2RTC_STREAMS.pop(camera_id, None)
+    return await ensure_go2rtc_stream(camera_id, source)
+
+
+async def prune_go2rtc_streams() -> None:
+    for camera_id in list(GO2RTC_STREAMS):
+        if source_for(camera_id):
+            continue
+        stream_name = go2rtc_stream_name(camera_id)
+        await go2rtc_request("DELETE", f"/api/streams?src={quote(stream_name, safe='')}", timeout=10)
+        GO2RTC_STREAMS.pop(camera_id, None)
+        log(f"go2rtc camera={camera_id} status=pruned stream={stream_name}")
+
+
+def go2rtc_lock(camera_id: str) -> asyncio.Lock:
+    return GO2RTC_LOCKS.setdefault(camera_id, asyncio.Lock())
+
+
+async def go2rtc_stream_exists(stream_name: str) -> bool:
+    try:
+        status, _headers, body = await go2rtc_request("GET", "/api/streams", timeout=10)
+        if status >= 400:
+            return False
+        payload = json.loads(body.decode("utf-8") or "{}")
+        return stream_name in payload
+    except Exception:
+        return False
+
+
+async def go2rtc_stream_matches(stream_name: str, source: str) -> bool:
+    try:
+        status, _headers, body = await go2rtc_request("GET", "/api/streams", timeout=10)
+        if status >= 400:
+            return False
+        payload = json.loads(body.decode("utf-8") or "{}")
+        producers = payload.get(stream_name, {}).get("producers") or []
+        return any(producer.get("url") == source for producer in producers)
+    except Exception:
+        return False
+
+
+async def post_go2rtc_whep(camera_id: str, source: str, sdp_offer: str) -> web.Response:
+    stream_name = await ensure_go2rtc_stream(camera_id, source)
+    status = 503
+    headers: dict[str, str] = {}
+    body = b""
+    for attempt in range(1, GO2RTC_OPEN_ATTEMPTS + 1):
+        status, headers, body = await go2rtc_request(
+            "POST",
+            f"/api/webrtc?src={quote(stream_name, safe='')}",
+            data=sdp_offer.encode("utf-8"),
+            headers={"Content-Type": "application/sdp", "Accept": "application/sdp"},
+            timeout=30,
+        )
+        if status < 400:
+            break
+        error = redact_sensitive_text(body.decode("utf-8", errors="replace"))
+        log(
+            f"go2rtc-offer camera={camera_id} stream={stream_name} status=retry "
+            f"attempt={attempt}/{GO2RTC_OPEN_ATTEMPTS} code={status} error={error}"
+        )
+        if attempt < GO2RTC_OPEN_ATTEMPTS:
+            stream_name = await recycle_go2rtc_stream(camera_id, source)
+            await asyncio.sleep(GO2RTC_OPEN_RETRY_DELAY_SECONDS * attempt)
+    if status >= 400:
+        error = redact_sensitive_text(body.decode("utf-8", errors="replace"))
+        log(f"go2rtc-offer camera={camera_id} stream={stream_name} status=failed code={status} error={error}")
+        return web.json_response({"ok": False, "error": f"go2rtc WHEP offer failed: {status} {error}"}, status=503)
+
+    session_id = secrets.token_urlsafe(18)
+    upstream_location = headers.get("Location") or headers.get("location")
+    upstream_etag = headers.get("ETag") or headers.get("etag")
+    SESSIONS[session_id] = WhepSession(
+        None,
+        None,
+        camera_id,
+        "go2rtc-whep",
+        now_iso(),
+        camera_id,
+        upstream_location=upstream_location,
+        upstream_etag=upstream_etag,
+    )
+    SESSIONS[session_id].cleanup_task = asyncio.create_task(close_session_later(session_id, SESSION_TTL_SECONDS))
+    answer_sdp = body.decode("utf-8", errors="replace")
+    answer_info = describe_sdp(answer_sdp)
+    log(
+        f"go2rtc-offer camera={camera_id} stream={stream_name} status=answer session={session_id} "
+        f"sdpBytes={answer_info['bytes']} candidates={answer_info['candidates']} location={bool(upstream_location)}"
+    )
+    return web.Response(
+        status=201,
+        text=answer_sdp,
+        headers={
+            "Location": f"/{quote(camera_id)}/whep/{session_id}",
+            "ETag": f'"{session_id}"',
+            "Content-Type": "application/sdp",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Expose-Headers": "Location, ETag",
+        },
+    )
+
+
+async def go2rtc_prewarm(camera_id: str, source: str) -> web.Response:
+    stream_name = await ensure_go2rtc_stream(camera_id, source)
+    status = 503
+    body = b""
+    for attempt in range(1, GO2RTC_OPEN_ATTEMPTS + 1):
+        status, _headers, body = await go2rtc_request(
+            "GET",
+            f"/api/frame.jpeg?src={quote(stream_name, safe='')}&width=320&height=180",
+            timeout=30,
+        )
+        if status < 400 and len(body) >= 100:
+            break
+        error = redact_sensitive_text(body.decode("utf-8", errors="replace")) if status >= 400 else "empty JPEG response"
+        log(
+            f"go2rtc-prewarm camera={camera_id} stream={stream_name} status=retry "
+            f"attempt={attempt}/{GO2RTC_OPEN_ATTEMPTS} code={status} error={error}"
+        )
+        if attempt < GO2RTC_OPEN_ATTEMPTS:
+            stream_name = await recycle_go2rtc_stream(camera_id, source)
+            await asyncio.sleep(GO2RTC_OPEN_RETRY_DELAY_SECONDS * attempt)
+    if status >= 400 or len(body) < 100:
+        error = redact_sensitive_text(body.decode("utf-8", errors="replace")) if status >= 400 else "empty JPEG response"
+        log(f"go2rtc-prewarm camera={camera_id} stream={stream_name} status=failed code={status} bytes={len(body)} error={error}")
+        return web.json_response({"ok": False, "error": f"go2rtc prewarm failed: {status} {error}"}, status=503)
+    log(f"go2rtc-prewarm camera={camera_id} stream={stream_name} status=ok bytes={len(body)}")
+    return web.json_response(
+        {
+            "ok": True,
+            "cameraId": camera_id,
+            "video": True,
+            "audio": None,
+            "warmSources": len(GO2RTC_STREAMS),
+            "engine": "go2rtc",
+            "bytes": len(body),
+        },
+        headers={"Access-Control-Allow-Origin": "*"},
+    )
+
+
+async def get_snapshot(request: web.Request) -> web.Response:
+    camera_id = request.match_info["camera_id"]
+    source = source_for(camera_id)
+    if not source:
+        return web.json_response({"ok": False, "error": f"No media source configured for {camera_id}"}, status=503)
+    if not go2rtc_configured():
+        return web.json_response({"ok": False, "error": "go2rtc snapshot path is unavailable"}, status=503)
+
+    async with go2rtc_lock(camera_id):
+        return await get_go2rtc_snapshot(request, camera_id, source)
+
+
+async def get_go2rtc_snapshot(request: web.Request, camera_id: str, source: str) -> web.Response:
+    stream_name = await ensure_go2rtc_stream(camera_id, source)
+    params = [f"src={quote(stream_name, safe='')}"]
+    for name in ("width", "height", "quality"):
+        value = request.query.get(name)
+        if value:
+            params.append(f"{name}={quote(value, safe='')}")
+    status = 503
+    body = b""
+    for attempt in range(1, GO2RTC_OPEN_ATTEMPTS + 1):
+        status, _headers, body = await go2rtc_request(
+            "GET",
+            f"/api/frame.jpeg?{'&'.join(params)}",
+            timeout=GO2RTC_SNAPSHOT_TIMEOUT_SECONDS,
+        )
+        if status < 400 and len(body) >= 100:
+            break
+        error = redact_sensitive_text(body.decode("utf-8", errors="replace")) if status >= 400 else "empty JPEG response"
+        log(
+            f"go2rtc-snapshot camera={camera_id} stream={stream_name} status=retry "
+            f"attempt={attempt}/{GO2RTC_OPEN_ATTEMPTS} code={status} bytes={len(body)} error={error}"
+        )
+        if attempt < GO2RTC_OPEN_ATTEMPTS:
+            stream_name = await recycle_go2rtc_stream(camera_id, source)
+            await asyncio.sleep(GO2RTC_OPEN_RETRY_DELAY_SECONDS * attempt)
+    if status >= 400 or len(body) < 100:
+        error = redact_sensitive_text(body.decode("utf-8", errors="replace")) if status >= 400 else "empty JPEG response"
+        log(f"go2rtc-snapshot camera={camera_id} stream={stream_name} status=failed code={status} bytes={len(body)} error={error}")
+        return web.json_response({"ok": False, "error": f"go2rtc snapshot failed: {status} {error}"}, status=503)
+
+    max_bytes = int(request.query.get("max_bytes", "0") or 0)
+    if max_bytes and len(body) > max_bytes:
+        return web.json_response(
+            {"ok": False, "error": f"Snapshot is {len(body)} bytes; Matter budget is {max_bytes} bytes"},
+            status=413,
+        )
+    log(f"go2rtc-snapshot camera={camera_id} stream={stream_name} status=ok bytes={len(body)}")
+    return web.Response(body=body, content_type="image/jpeg", headers={"Access-Control-Allow-Origin": "*"})
+
+
 async def open_player(camera_id: str, source: str, mode: str) -> MediaPlayer:
     last_error: Exception | None = None
     for attempt in range(1, RTSP_OPEN_ATTEMPTS + 1):
@@ -211,7 +490,7 @@ async def warm_source_or_error(camera_id: str, source: str, mode: str, peer: RTC
         player = await open_player(camera_id, source, mode)
     except Exception as error:
         await peer.close()
-        return None, web.json_response({"ok": False, "error": str(error)}, status=503)
+        return None, web.json_response({"ok": False, "error": redact_sensitive_text(error)}, status=503)
 
     warm = WarmSource(player=player, source=source, created_at=now_iso(), last_used_at=now_iso())
     WARM_SOURCES[source_key] = warm
@@ -239,6 +518,19 @@ async def post_whep(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": "WHEP offer body must be SDP"}, status=400)
 
     offer_info = describe_sdp(sdp_offer)
+    if go2rtc_configured():
+        log(
+            f"go2rtc-offer camera={camera_id} status=forward "
+            f"sdpBytes={offer_info['bytes']} candidates={offer_info['candidates']} "
+            f"hostCandidates={offer_info['hostCandidates']} srflxCandidates={offer_info['srflxCandidates']}"
+        )
+        try:
+            async with go2rtc_lock(camera_id):
+                return await post_go2rtc_whep(camera_id, source, sdp_offer)
+        except Exception as error:
+            log(f"go2rtc-offer camera={camera_id} status=exception error={error}")
+            return web.json_response({"ok": False, "error": redact_sensitive_text(error)}, status=503)
+
     log(
         f"offer camera={camera_id} status=open-rtsp "
         f"sdpBytes={offer_info['bytes']} candidates={offer_info['candidates']} "
@@ -349,6 +641,8 @@ async def post_provider_answer(request: web.Request) -> web.Response:
     if not sdp_answer.strip():
         return web.json_response({"ok": False, "error": "Provider answer body must be SDP"}, status=400)
 
+    if session.peer is None:
+        return web.json_response({"ok": False, "error": "Provider peer is unavailable"}, status=409)
     await session.peer.setRemoteDescription(RTCSessionDescription(sdp=sdp_answer, type="answer"))
     answer_info = describe_sdp(sdp_answer)
     log(
@@ -367,6 +661,40 @@ async def patch_whep(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": "WHEP session not found"}, status=404)
 
     body = await request.text()
+    if session.upstream_location:
+        headers = {
+            "Content-Type": request.headers.get("Content-Type", "application/trickle-ice-sdpfrag"),
+            "If-Match": session.upstream_etag or request.headers.get("If-Match", "*"),
+        }
+        status, response_headers, response_body = await go2rtc_request(
+            "PATCH",
+            go2rtc_session_url(session.upstream_location),
+            data=body.encode("utf-8"),
+            headers=headers,
+            timeout=15,
+        )
+        if response_headers.get("ETag") or response_headers.get("etag"):
+            session.upstream_etag = response_headers.get("ETag") or response_headers.get("etag")
+        if status >= 400:
+            error = redact_sensitive_text(response_body.decode("utf-8", errors="replace"))
+            log(f"go2rtc-candidates camera={camera_id} session={session_id} status=failed code={status} error={error}")
+            return web.json_response({"ok": False, "error": f"go2rtc candidate PATCH failed: {status} {error}"}, status=503)
+        log(f"go2rtc-candidates camera={camera_id} session={session_id} bytes={len(body)} status=forwarded")
+        return web.Response(status=204, headers={
+            "Access-Control-Allow-Origin": "*",
+            "ETag": session.upstream_etag or f'"{session_id}"',
+        })
+
+    if session.mode == "go2rtc-whep":
+        log(
+            f"go2rtc-candidates camera={camera_id} session={session_id} bytes={len(body)} "
+            "status=skipped reason=upstream-does-not-support-trickle"
+        )
+        return web.Response(status=204, headers={
+            "Access-Control-Allow-Origin": "*",
+            "ETag": f'"{session_id}"',
+        })
+
     sdp_mid: str | None = None
     sdp_mline_index: int | None = None
     candidate_lines = [
@@ -388,7 +716,8 @@ async def patch_whep(request: web.Request) -> web.Response:
             candidate = candidate_from_sdp(candidate_text)
             candidate.sdpMid = sdp_mid
             candidate.sdpMLineIndex = sdp_mline_index
-            await session.peer.addIceCandidate(candidate)
+            if session.peer is not None:
+                await session.peer.addIceCandidate(candidate)
             added += 1
     log(f"candidates camera={camera_id} session={session_id} bytes={len(body)} count={len(candidate_lines)} added={added}")
     return web.Response(status=204, headers={"Access-Control-Allow-Origin": "*"})
@@ -399,6 +728,17 @@ async def delete_whep(request: web.Request) -> web.Response:
     session_id = request.match_info["session_id"]
     session = SESSIONS.pop(session_id, None)
     if session:
+        if session.upstream_location:
+            try:
+                status, _headers, body = await go2rtc_request(
+                    "DELETE",
+                    go2rtc_session_url(session.upstream_location),
+                    timeout=15,
+                )
+                if status >= 400:
+                    log(f"go2rtc-delete camera={camera_id} session={session_id} status=failed code={status} error={body.decode('utf-8', errors='replace')}")
+            except Exception as error:
+                log(f"go2rtc-delete camera={camera_id} session={session_id} status=exception error={error}")
         await close_session(session)
     log(f"delete camera={camera_id} session={session_id} existed={bool(session)} sessions={len(SESSIONS)}")
     return web.Response(status=204, headers={"Access-Control-Allow-Origin": "*"})
@@ -410,6 +750,14 @@ async def post_prewarm(request: web.Request) -> web.Response:
     if not source:
         log(f"prewarm camera={camera_id} status=no-media-source")
         return web.json_response({"ok": False, "error": f"No media source configured for {camera_id}"}, status=503)
+
+    if go2rtc_configured():
+        try:
+            async with go2rtc_lock(camera_id):
+                return await go2rtc_prewarm(camera_id, source)
+        except Exception as error:
+            log(f"go2rtc-prewarm camera={camera_id} status=exception error={error}")
+            return web.json_response({"ok": False, "error": redact_sensitive_text(error)}, status=503)
 
     peer = RTCPeerConnection()
     warm, error_response = await warm_source_or_error(camera_id, source, "prewarm", peer)
@@ -436,12 +784,14 @@ async def options(_request: web.Request) -> web.Response:
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Methods": "POST, PATCH, DELETE, OPTIONS",
             "Access-Control-Allow-Headers": "Content-Type, If-Match",
-            "Access-Control-Expose-Headers": "Location",
+            "Access-Control-Expose-Headers": "Location, ETag",
         },
     )
 
 
 async def health(_request: web.Request) -> web.Response:
+    if go2rtc_configured():
+        await prune_go2rtc_streams()
     configured = configured_source_names()
     sessions = [
         {
@@ -450,9 +800,10 @@ async def health(_request: web.Request) -> web.Response:
             "mode": session.mode,
             "createdAt": session.created_at,
             "sourceKey": session.source_key,
-            "connectionState": session.peer.connectionState,
-            "iceConnectionState": session.peer.iceConnectionState,
-            "iceGatheringState": session.peer.iceGatheringState,
+            "connectionState": session.peer.connectionState if session.peer else "managed-by-go2rtc",
+            "iceConnectionState": session.peer.iceConnectionState if session.peer else None,
+            "iceGatheringState": session.peer.iceGatheringState if session.peer else None,
+            "upstreamSession": bool(session.upstream_location),
         }
         for session_id, session in SESSIONS.items()
     ]
@@ -474,6 +825,9 @@ async def health(_request: web.Request) -> web.Response:
                 for camera_id, source in WARM_SOURCES.items()
             ],
             "advertiseIp": configured_advertise_ip() or None,
+            "engine": "go2rtc" if go2rtc_configured() else "aiortc",
+            "go2rtcConfigured": go2rtc_configured(),
+            "go2rtcStreams": sorted(GO2RTC_STREAMS),
         }
     )
 
@@ -485,7 +839,8 @@ async def close_session(session: WhepSession) -> None:
         for track in [session.player.audio, session.player.video]:
             if track:
                 track.stop()
-    await session.peer.close()
+    if session.peer is not None:
+        await session.peer.close()
 
 
 async def close_warm_source(source_key: str, source: WarmSource) -> None:
@@ -532,6 +887,7 @@ def create_app() -> web.Application:
     app.router.add_get("/health", health)
     app.router.add_post("/{camera_id}/whep", post_whep)
     app.router.add_post("/{camera_id}/prewarm", post_prewarm)
+    app.router.add_get("/{camera_id}/snapshot.jpg", get_snapshot)
     app.router.add_post("/{camera_id}/provider-offers", post_provider_offer)
     app.router.add_post("/{camera_id}/provider/{session_id}/answer", post_provider_answer)
     app.router.add_patch("/{camera_id}/whep/{session_id}", patch_whep)

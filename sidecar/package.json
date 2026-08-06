@@ -1,6 +1,6 @@
 {
   "name": "stream-to-matter-sidecar",
-  "version": "0.1.38",
+  "version": "0.1.39",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,9 +9,9 @@
     "whep:check": "node scripts/whepCheck.js"
   },
   "dependencies": {
-    "@matter/main": "0.17.3",
-    "@matter/node": "0.17.3",
-    "@matter/nodejs": "0.17.3",
+    "@matter/main": "0.17.7",
+    "@matter/node": "0.17.7",
+    "@matter/nodejs": "0.17.7",
     "qrcode": "^1.5.4",
     "werift": "^0.23.0"
   }

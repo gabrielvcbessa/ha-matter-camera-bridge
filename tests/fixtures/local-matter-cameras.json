@@ -4,7 +4,7 @@
       "id": "lab_camera",
       "name": "Local Matter Lab Camera",
       "rtsp_url": "rtsp://127.0.0.1:28555/stm_lab",
-      "media_source": "rtsp://127.0.0.1:28555/stm_lab",
+      "media_source": "ffmpeg:rtsp://127.0.0.1:28555/stm_lab#tcp#video=h264",
       "onvif": {
         "host": "127.0.0.1",
         "port": 18082,
@@ -17,6 +17,27 @@
         "advertise_ptz": true,
         "advertise_audio": false,
         "advertise_person_detection": true,
+        "advertise_two_way_audio": false,
+        "advertise_recording": false
+      }
+    },
+    {
+      "id": "lab_camera_two",
+      "name": "Local Matter Lab Camera Two",
+      "rtsp_url": "rtsp://127.0.0.1:28555/stm_lab",
+      "media_source": "ffmpeg:rtsp://127.0.0.1:28555/stm_lab#tcp#video=h264",
+      "onvif": {
+        "host": "127.0.0.1",
+        "port": 18082,
+        "user": "",
+        "password": ""
+      },
+      "matter": {
+        "device_type": "camera",
+        "standard": "Matter 1.5.1",
+        "advertise_ptz": true,
+        "advertise_audio": false,
+        "advertise_person_detection": false,
         "advertise_two_way_audio": false,
         "advertise_recording": false
       }

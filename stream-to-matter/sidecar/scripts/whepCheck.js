@@ -1,4 +1,4 @@
-import { RTCPeerConnection } from "werift";
+import { RTCPeerConnection, useH264 } from "werift";
 
 import { MediaClient } from "../src/mediaClient.js";
 
@@ -13,7 +13,10 @@ if (!baseUrl) {
 
 const mediaClient = new MediaClient(baseUrl);
 const peer = new RTCPeerConnection({
-  iceAdditionalHostAddresses: ["127.0.0.1"]
+  iceAdditionalHostAddresses: ["127.0.0.1"],
+  codecs: {
+    video: [useH264()]
+  }
 });
 
 let closed = false;
@@ -41,10 +44,12 @@ peer.ontrack = trackEvent => {
 
 try {
   peer.addTransceiver("video", { direction: "recvonly" });
-  peer.addTransceiver("audio", { direction: "recvonly" });
+  if (process.env.WHEP_CHECK_AUDIO === "1") {
+    peer.addTransceiver("audio", { direction: "recvonly" });
+  }
 
   const offer = await peer.createOffer();
-  await peer.setLocalDescription(offer);
+  await peer.setLocalDescription({ type: offer.type, sdp: preferH264(offer.sdp) });
 
   const answer = await mediaClient.whepOffer(cameraId, peer.localDescription.sdp);
   whepSession = answer.location;
@@ -157,4 +162,34 @@ function waitForVideo(mediaState, timeout) {
       clearInterval(timer);
     }
   });
+}
+
+function preferH264(sdp) {
+  if (!sdp) return sdp;
+  const sections = sdp.split(/(?=m=)/);
+  return sections.map(section => {
+    if (!section.startsWith("m=video ")) return section;
+
+    const lines = section.split(/\r?\n/);
+    const media = lines[0].split(" ");
+    const payloads = media.slice(3);
+    const codecByPayload = new Map();
+    const aptByPayload = new Map();
+
+    for (const line of lines) {
+      const rtpmap = line.match(/^a=rtpmap:(\d+)\s+([^/]+)/i);
+      if (rtpmap) codecByPayload.set(rtpmap[1], rtpmap[2].toUpperCase());
+      const fmtp = line.match(/^a=fmtp:(\d+)\s+.*(?:^|[ ;])apt=(\d+)/i);
+      if (fmtp) aptByPayload.set(fmtp[1], fmtp[2]);
+    }
+
+    const h264 = payloads.filter(payload => codecByPayload.get(payload) === "H264");
+    if (!h264.length) return section;
+
+    const h264Rtx = payloads.filter(payload => codecByPayload.get(payload) === "RTX" && h264.includes(aptByPayload.get(payload)));
+    const preferred = [...h264, ...h264Rtx];
+    const rest = payloads.filter(payload => !preferred.includes(payload));
+    lines[0] = [...media.slice(0, 3), ...preferred, ...rest].join(" ");
+    return lines.join("\r\n");
+  }).join("");
 }

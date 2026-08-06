@@ -55,7 +55,9 @@ matter_mdns_ipv6: false
 `matter_listen_ipv4` must be the Home Assistant host IP, not the camera IP and
 not `homeassistant.local`. `whep_advertise_ip` should normally be the same
 value; it is the IP address embedded in WebRTC ICE candidates for live view.
-If you leave it blank, the add-on defaults it to `matter_listen_ipv4`.
+If you leave it blank, the add-on uses `matter_listen_ipv4` or auto-detects the
+host IPv4 address from its default route. Set it explicitly on hosts with
+multiple routed network interfaces.
 
 To find the correct IP and interface, open the Home Assistant Terminal/SSH
 add-on and run:

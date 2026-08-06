@@ -1,4 +1,7 @@
 import { ServerNode, Endpoint } from "@matter/main/node";
+import { BasicInformationServer } from "@matter/main/behaviors/basic-information";
+import { BridgedDeviceBasicInformationServer } from "@matter/main/behaviors/bridged-device-basic-information";
+import { DescriptorServer } from "@matter/main/behaviors/descriptor";
 import { AggregatorEndpoint } from "@matter/main/endpoints/aggregator";
 import { NodeJsNetwork } from "@matter/nodejs";
 import { createBridgeCameraEndpoint } from "./cameraEndpoint.js";
@@ -23,6 +26,7 @@ export class MatterNodeRuntime {
     this.started = false;
     this.error = null;
     this.cameraEndpoints = {};
+    this.cameraEndpointRefs = {};
     this.personEndpoints = {};
     this.personEndpointRefs = {};
   }
@@ -79,6 +83,7 @@ export class MatterNodeRuntime {
       }
       await this.node.start();
       this.started = true;
+      await this.#announceStructure();
       this.error = null;
       const status = this.status();
       logEvent("matter", "node_started", {
@@ -114,6 +119,7 @@ export class MatterNodeRuntime {
       return;
     }
     this.cameraEndpoints = {};
+    this.cameraEndpointRefs = {};
     this.personEndpoints = {};
     this.personEndpointRefs = {};
     this.aggregator = new Endpoint(AggregatorEndpoint, { id: CAMERA_AGGREGATOR_ID });
@@ -127,6 +133,7 @@ export class MatterNodeRuntime {
           advertiseAudio: camera.advertise_audio
         });
         await this.aggregator.add(endpoint);
+        this.cameraEndpointRefs[cameraId] = endpoint;
         this.cameraEndpoints[cameraId] = {
           attached: true,
           name: camera.name,
@@ -170,6 +177,42 @@ export class MatterNodeRuntime {
         };
       logEvent("matter", "camera_endpoint_attach_failed", { cameraId, ...errorFields(error) }, "error");
       }
+    }
+  }
+
+  async #announceStructure() {
+    if (!this.node || !this.aggregator) return;
+    try {
+      const partsList = [...this.aggregator.parts]
+        .filter(part => part.lifecycle.hasNumber)
+        .map(part => part.number)
+        .sort((a, b) => Number(a) - Number(b));
+      await this.aggregator.setStateOf(DescriptorServer, { partsList });
+
+      let configurationVersion = null;
+      const bridgedEndpoints = [
+        ...Object.values(this.cameraEndpointRefs),
+        ...Object.values(this.personEndpointRefs)
+      ];
+      await this.node.act(async agent => {
+        const basic = agent.get(BasicInformationServer);
+        await basic.increaseConfigurationVersion(async context => {
+          for (const endpoint of bridgedEndpoints) {
+            await endpoint.act(async endpointAgent => {
+              const bridged = endpointAgent.get(BridgedDeviceBasicInformationServer);
+              bridged.state.configurationVersion ??= 1;
+              await bridged.increaseConfigurationVersion(undefined, context);
+            });
+          }
+        });
+        configurationVersion = basic.state.configurationVersion ?? null;
+      });
+      logEvent("matter", "bridge_structure_announced", {
+        configurationVersion,
+        partsList: partsList.map(Number)
+      });
+    } catch (error) {
+      logEvent("matter", "bridge_structure_announce_failed", errorFields(error), "warn");
     }
   }
 
@@ -250,7 +293,8 @@ export function matterServerNodeOptions() {
           hardwareVersion: 1,
           hardwareVersionString: "1",
           softwareVersion: 1,
-          softwareVersionString: SOFTWARE_VERSION
+          softwareVersionString: SOFTWARE_VERSION,
+          configurationVersion: 1
         },
         commissioning: {
           passcode: numberEnv(process.env.MATTER_PASSCODE, DEFAULT_PASSCODE),

@@ -8,6 +8,7 @@ sidecar/node_modules/
 .env
 .lab/
 .local-matter-lab/
+.artifacts/
 snapshots/
 relay/
 matter-storage/

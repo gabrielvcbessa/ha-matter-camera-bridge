@@ -59,12 +59,15 @@ test("allows Matter IPv4 listen address override", () => {
 });
 
 test("filters IPv6 mDNS records by default for Home Assistant routing", () => {
+  const previousInterface = process.env.MATTER_MDNS_INTERFACE;
   const previousIpv6 = process.env.MATTER_MDNS_IPV6;
   try {
+    delete process.env.MATTER_MDNS_INTERFACE;
     delete process.env.MATTER_MDNS_IPV6;
 
     assert.deepEqual(matterMdnsOptions(), { interface: "", ipv6: false });
   } finally {
+    restoreEnv("MATTER_MDNS_INTERFACE", previousInterface);
     restoreEnv("MATTER_MDNS_IPV6", previousIpv6);
   }
 });

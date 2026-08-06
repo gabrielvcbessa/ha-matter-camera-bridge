@@ -27,6 +27,7 @@ const BRIDGE_URL = process.env.BRIDGE_URL ?? "http://stream-to-matter:8080";
 const COMMISSIONING_MODE = process.env.SIDECAR_MODE ?? "manifest-validated";
 let cameraIds = (process.env.CAMERA_IDS ?? process.env.CAMERA_ID ?? "camera").split(",").map(value => value.trim()).filter(Boolean);
 const HEARTBEAT_SECONDS = Number(process.env.STATUS_HEARTBEAT_SECONDS ?? 60);
+const PROBE_INTERVAL_SECONDS = Number(process.env.CAMERA_PROBE_INTERVAL_SECONDS ?? 300);
 
 Logger.level = process.env.MATTER_LOG_LEVEL ?? "notice";
 Logger.format = process.env.MATTER_LOG_FORMAT ?? "plain";
@@ -41,6 +42,7 @@ let lastCameraProbes = {};
 let lastMediaHealth = null;
 let cameraDefinitions = cameraIds.map(id => ({ id, name: id }));
 let startupError = null;
+let lastProbeRefreshAt = 0;
 const dashboardMatterStates = new Map();
 
 async function refreshBridgeState() {
@@ -81,13 +83,21 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && url.pathname === "/health") {
-      return json(response, 200, {
-        ok: startupError === null,
+      const nodeStatus = matterNode.status();
+      const attachedCameraIds = cameraIds.filter(cameraId => nodeStatus.cameraEndpoints?.[cameraId]?.attached);
+      const ready = startupError === null
+        && Boolean(nodeStatus.started)
+        && attachedCameraIds.length === cameraIds.length;
+      return json(response, ready ? 200 : 503, {
+        ok: ready,
         mode: COMMISSIONING_MODE,
         bridgeUrl: BRIDGE_URL,
         matterCameraDefinitionsLoaded: matterSupport.cameraDeviceDefinitionsLoaded,
-        matterNodeStarted: matterNode.status().started,
-        pairable: matterNode.status().pairable
+        matterNodeStarted: nodeStatus.started,
+        pairable: nodeStatus.pairable,
+        cameraEndpointsAttached: attachedCameraIds.length,
+        cameraEndpointsExpected: cameraIds.length,
+        startupError
       });
     }
 
@@ -108,7 +118,7 @@ const server = http.createServer(async (request, response) => {
       const [, rawCameraId] = matterSnapshotMatch;
       const cameraId = decodeURIComponent(rawCameraId);
       try {
-        const result = await matterCaptureSnapshotCommand(cameraId, bridge, snapshotMatterRequestFromUrl(url), matterStateForCamera(cameraId));
+        const result = await matterCaptureSnapshotCommand(cameraId, bridge, snapshotMatterRequestFromUrl(url), matterStateForCamera(cameraId), media);
         return bytesResponse(response, 200, "image/jpeg", Buffer.from(result.data), {
           "X-Stream-To-Matter-Path": "matter-camera-av-stream-management"
         });
@@ -190,7 +200,7 @@ const server = http.createServer(async (request, response) => {
       await matterEndWhepSessionCommand(cameraId, media, {
         webRtcSessionId: Number(url.searchParams.get("webRtcSessionId") ?? 0) || undefined,
         location: url.searchParams.get("location")
-      }, matterStateForCamera(cameraId));
+      }, matterStateForCamera(cameraId), dashboardMatterContext());
       return json(response, 200, { ok: true, path: "matter-web-rtc-transport-provider" });
     }
 
@@ -403,6 +413,7 @@ const server = http.createServer(async (request, response) => {
       startupError = null;
       try {
         await refreshBridgeState();
+        await refreshRuntimeDiagnostics(true);
       } catch (error) {
         startupError = { message: error.message, payload: error.payload };
       }
@@ -522,7 +533,7 @@ if (HEARTBEAT_SECONDS > 0) {
 }
 
 async function statusPayload({ includeSensitive = false } = {}) {
-  await refreshRuntimeDiagnostics(true);
+  await refreshRuntimeDiagnostics();
   const cameraConfig = await publicCameraConfig(undefined, { redactSensitive: true }).catch(errorPayload);
   const matterReset = await readMatterResetRequest();
   return {
@@ -549,20 +560,23 @@ async function statusPayload({ includeSensitive = false } = {}) {
   };
 }
 
-async function refreshRuntimeDiagnostics(includeProbe = true) {
+async function refreshRuntimeDiagnostics(forceProbe = false) {
   lastBridgeHealth = await bridge.health().catch(errorPayload);
   lastMediaHealth = await media.health().catch(errorPayload);
-  if (includeProbe) {
+  const probeIsStale = PROBE_INTERVAL_SECONDS > 0
+    && Date.now() - lastProbeRefreshAt >= PROBE_INTERVAL_SECONDS * 1000;
+  if (forceProbe || probeIsStale) {
     const probes = {};
     for (const cameraId of cameraIds) {
       probes[cameraId] = await bridge.probe(cameraId).catch(errorPayload);
     }
     lastCameraProbes = probes;
+    lastProbeRefreshAt = Date.now();
   }
 }
 
 async function logHeartbeat() {
-  await refreshRuntimeDiagnostics(true);
+  await refreshRuntimeDiagnostics();
   const nodeStatus = matterNode.status();
   const payload = {
     cameraIds,

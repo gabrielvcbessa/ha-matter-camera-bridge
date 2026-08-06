@@ -4,7 +4,7 @@
   "matter_port": 15540,
   "matter_tcp": true,
   "matter_listen_ipv4": "",
-  "whep_advertise_ip": "127.0.0.1",
+  "whep_advertise_ip": "",
   "matter_mdns_interface": "eth0",
   "matter_mdns_ipv6": false,
   "product_name": "Local Matter Camera Lab",

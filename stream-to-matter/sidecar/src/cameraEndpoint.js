@@ -10,7 +10,7 @@ import { CameraAvStreamManagement } from "@matter/types/clusters/camera-av-strea
 import { CameraAvSettingsUserLevelManagement } from "@matter/types/clusters/camera-av-settings-user-level-management";
 import { WebRtcTransportRequestor } from "@matter/types/clusters/web-rtc-transport-requestor";
 import { ClientInteraction, DedicatedChannelExchangeProvider, ExchangeManager, Invoke } from "@matter/protocol";
-import { StreamUsage, ThreeLevelAuto } from "@matter/types";
+import { Status, StatusResponseError, StreamUsage, ThreeLevelAuto } from "@matter/types";
 import { errorFields, logEvent } from "./diagnosticLog.js";
 import { markWebRtcSession, recordMatterCommand } from "./matterActivity.js";
 import { SOFTWARE_VERSION } from "./version.js";
@@ -18,13 +18,23 @@ import { SOFTWARE_VERSION } from "./version.js";
 let nextVideoStreamId = 1;
 let nextAudioStreamId = 1;
 let nextSnapshotStreamId = 2;
-let nextWebRtcSessionId = 1;
+const nextWebRtcSessionIds = new Map();
 const webRtcSessions = new Map();
 const MATTER_SNAPSHOT_RESPONSE_BUDGET_BYTES = 56_000;
+const REQUESTOR_ANSWER_RETRY_DELAYS_MS = [0, 200, 500, 1_000, 2_000];
 
 const WebRtcTransportProviderServerWithoutSFrame = webRtcTransportProviderWithoutSFrame(
   CameraRequirements.WebRtcTransportProviderServer
 );
+
+export function assertLiveViewUsage(usage, command) {
+  const normalized = usage ?? StreamUsage.LiveView;
+  if (normalized === StreamUsage.LiveView) return normalized;
+  throw new StatusResponseError(
+    `${command}: streamUsage=${normalized} is unsupported until Push AV Stream Transport is implemented`,
+    Status.ConstraintError
+  );
+}
 
 export function webRtcTransportProviderCommandFields(commandName) {
   return WebRtcTransportProviderServerWithoutSFrame.schema.commands
@@ -33,20 +43,30 @@ export function webRtcTransportProviderCommandFields(commandName) {
     ?.map(field => field.propertyName) ?? [];
 }
 
-export async function matterCaptureSnapshotCommand(cameraId, bridgeClient, request = {}, state = {}) {
+export async function matterCaptureSnapshotCommand(cameraId, bridgeClient, request = {}, state = {}, mediaClient = null) {
   const snapshotStreamId = request?.snapshotStreamId ?? null;
   const stream = snapshotStreamForRequest(state, snapshotStreamId);
   const resolution = normalizeResolution(request?.requestedResolution ?? stream?.maxResolution, stream?.maxResolution ?? fullSnapshotResolution());
   recordMatterCommand(cameraId, "CameraAvStreamManagement", "captureSnapshot", { snapshotStreamId, resolution });
   logEvent("matter-camera", "capture_snapshot_start", { cameraId, snapshotStreamId, resolution });
   let bytes;
+  const snapshotOptions = {
+    width: resolution.width,
+    height: resolution.height,
+    quality: stream?.quality ?? 80,
+    max_bytes: MATTER_SNAPSHOT_RESPONSE_BUDGET_BYTES
+  };
   try {
-    bytes = await bridgeClient.snapshotBytes(cameraId, "jpeg", {
-      width: resolution.width,
-      height: resolution.height,
-      quality: stream?.quality ?? 80,
-      max_bytes: MATTER_SNAPSHOT_RESPONSE_BUDGET_BYTES
-    });
+    if (mediaClient?.configured?.() && mediaClient?.snapshotBytes) {
+      try {
+        bytes = await mediaClient.snapshotBytes(cameraId, snapshotOptions);
+        if (bytes.length < 100) throw new Error(`Media snapshot was unexpectedly small: ${bytes.length} bytes`);
+        logEvent("matter-camera", "capture_snapshot_media_path", { cameraId, snapshotStreamId });
+      } catch (error) {
+        logEvent("matter-camera", "capture_snapshot_media_fallback", { cameraId, snapshotStreamId, ...errorFields(error) }, "warn");
+      }
+    }
+    bytes ??= await bridgeClient.snapshotBytes(cameraId, "jpeg", snapshotOptions);
   } catch (error) {
     logEvent("matter-camera", "capture_snapshot_failed", { cameraId, snapshotStreamId, ...errorFields(error) }, "error");
     throw error;
@@ -60,7 +80,8 @@ export async function matterCaptureSnapshotCommand(cameraId, bridgeClient, reque
 }
 
 export async function matterProvideWhepOfferCommand(cameraId, mediaClient, request = {}, state = {}, context = {}) {
-  const webRtcSessionId = request?.webRtcSessionId ?? nextWebRtcSessionId++;
+  assertLiveViewUsage(request?.streamUsage, "ProvideOffer");
+  const webRtcSessionId = request?.webRtcSessionId ?? nextWebRtcSessionId(cameraId);
   recordMatterCommand(cameraId, "WebRtcTransportProvider", "provideOffer", {
     webRtcSessionId,
     sdpBytes: String(request?.sdp ?? "").length,
@@ -70,7 +91,7 @@ export async function matterProvideWhepOfferCommand(cameraId, mediaClient, reque
   if (!mediaClient?.configured?.()) {
     logEvent("matter-camera", "provide_offer_no_whep", { cameraId, webRtcSessionId }, "warn");
     markWebRtcSession(cameraId, webRtcSessionId, "no-whep");
-    webRtcSessions.set(webRtcSessionId, {});
+    setWebRtcSession(cameraId, webRtcSessionId, {}, context);
     upsertWebRtcSession(state, webRtcSessionFromRequest(webRtcSessionId, request, context));
     return {
       webRtcSessionId,
@@ -90,15 +111,16 @@ export async function matterProvideWhepOfferCommand(cameraId, mediaClient, reque
     answer = await mediaClient.whepOffer(cameraId, request?.sdp ?? "");
   } catch (error) {
     cleanupAllocatedStreamsAfterFailedOffer(state, request);
-    webRtcSessions.delete(webRtcSessionId);
+    deleteWebRtcSession(cameraId, webRtcSessionId, context);
     markWebRtcSession(cameraId, webRtcSessionId, "failed", errorFields(error));
     logEvent("matter-camera", "provide_offer_failed", { cameraId, webRtcSessionId, ...errorFields(error) }, "error");
     throw error;
   }
-  webRtcSessions.set(webRtcSessionId, {
+  setWebRtcSession(cameraId, webRtcSessionId, {
     location: answer.location,
+    etag: answer.etag,
     sdp: answer.sdp
-  });
+  }, context);
   upsertWebRtcSession(state, webRtcSessionFromRequest(webRtcSessionId, request, context));
   markWebRtcSession(cameraId, webRtcSessionId, "answered", { location: answer.location });
   logEvent("matter-camera", "provide_offer_answer_ready", { cameraId, webRtcSessionId, sdpBytes: String(answer.sdp ?? "").length });
@@ -110,16 +132,16 @@ export async function matterProvideWhepOfferCommand(cameraId, mediaClient, reque
   };
 }
 
-export async function matterEndWhepSessionCommand(cameraId, mediaClient, request = {}, state = {}) {
+export async function matterEndWhepSessionCommand(cameraId, mediaClient, request = {}, state = {}, context = {}) {
   const webRtcSessionId = request?.webRtcSessionId;
-  const session = webRtcSessions.get(webRtcSessionId) ?? {};
+  const session = getWebRtcSession(cameraId, webRtcSessionId, context) ?? {};
   const location = request?.location ?? session?.location ?? null;
   recordMatterCommand(cameraId, "WebRtcTransportProvider", "endSession", { webRtcSessionId });
   logEvent("matter-camera", "end_session", { cameraId, webRtcSessionId });
   await safeBridgeCall("end_session_stop_whep", cameraId, { webRtcSessionId, location }, () =>
     mediaClient?.stopWhepSession?.(cameraId, location)
   );
-  if (webRtcSessionId != null) webRtcSessions.delete(webRtcSessionId);
+  if (webRtcSessionId != null) deleteWebRtcSession(cameraId, webRtcSessionId, context);
   state.currentSessions = (state.currentSessions ?? []).filter(session => session.id !== webRtcSessionId);
   markWebRtcSession(cameraId, webRtcSessionId, "ended");
 }
@@ -197,13 +219,15 @@ export async function matterPtzStatusCommand(cameraId, bridgeClient) {
 
 export function createBridgeCameraEndpoint(cameraId, bridgeClient, mediaClient = null, cameraName = cameraId, options = {}) {
   const advertisePtz = options.advertisePtz !== false;
+  const advertiseAudio = options.advertiseAudio !== false;
   const CameraAvStreamManagementWithImageControl =
-    CameraAvStreamManagementServer.with("Video", "Audio", "Snapshot", "ImageControl");
+    CameraAvStreamManagementServer.with("Video", ...(advertiseAudio ? ["Audio"] : []), "Snapshot", "ImageControl");
   const CameraAvSettingsUserLevelManagementWithMptz =
     CameraAvSettingsUserLevelManagementServer.with("MechanicalPan", "MechanicalTilt", "MechanicalZoom");
 
   class BridgeCameraAvStreamManagementServer extends CameraAvStreamManagementWithImageControl {
     async videoStreamAllocate(request) {
+      assertLiveViewUsage(request?.streamUsage, "VideoStreamAllocate");
       const videoStreamId = nextVideoStreamId++;
       const stream = videoStreamFromRequest(videoStreamId, request);
       this.state.allocatedVideoStreams = [...(this.state.allocatedVideoStreams ?? []), stream];
@@ -239,6 +263,7 @@ export function createBridgeCameraEndpoint(cameraId, bridgeClient, mediaClient =
     }
 
     async audioStreamAllocate(request) {
+      assertLiveViewUsage(request?.streamUsage, "AudioStreamAllocate");
       const audioStreamId = nextAudioStreamId++;
       const stream = audioStreamFromRequest(audioStreamId, request);
       this.state.allocatedAudioStreams = [...(this.state.allocatedAudioStreams ?? []), stream];
@@ -310,16 +335,21 @@ export function createBridgeCameraEndpoint(cameraId, bridgeClient, mediaClient =
     }
 
     async captureSnapshot(request) {
-      return matterCaptureSnapshotCommand(cameraId, bridgeClient, request, this.state);
+      return matterCaptureSnapshotCommand(cameraId, bridgeClient, request, this.state, mediaClient);
     }
 
-    async setStreamPriorities(_request) {
-      recordMatterCommand(cameraId, "CameraAvStreamManagement", "setStreamPriorities");
+    async setStreamPriorities(request) {
+      this.state.streamUsagePriorities = [StreamUsage.LiveView];
+      recordMatterCommand(cameraId, "CameraAvStreamManagement", "setStreamPriorities", {
+        requested: request?.streamPriorities ?? [],
+        applied: this.state.streamUsagePriorities
+      });
     }
   }
 
   class BridgeWebRtcTransportProviderServer extends WebRtcTransportProviderServerWithoutSFrame {
     async solicitOffer(_request) {
+      assertLiveViewUsage(_request?.streamUsage, "SolicitOffer");
       const requestSummary = summarizeWebRtcRequest(_request, this.context);
       recordMatterCommand(cameraId, "WebRtcTransportProvider", "solicitOffer", {
         whepConfigured: mediaClient?.configured?.() ?? false,
@@ -330,9 +360,9 @@ export function createBridgeCameraEndpoint(cameraId, bridgeClient, mediaClient =
         whepConfigured: mediaClient?.configured?.() ?? false,
         ...requestSummary
       });
-      const webRtcSessionId = nextWebRtcSessionId++;
+      const webRtcSessionId = nextWebRtcSessionId(cameraId);
       markWebRtcSession(cameraId, webRtcSessionId, "solicited");
-      webRtcSessions.set(webRtcSessionId, {});
+      setWebRtcSession(cameraId, webRtcSessionId, {}, this.context);
       this.state.currentSessions = [
         ...(this.state.currentSessions ?? []),
         webRtcSessionFromRequest(webRtcSessionId, _request, this.context)
@@ -352,15 +382,13 @@ export function createBridgeCameraEndpoint(cameraId, bridgeClient, mediaClient =
       const { webRtcSessionId } = answer;
       scheduleRequestorAnswer(this, cameraId, request, webRtcSessionId, answer.sdp);
       return {
-        webRtcSessionId,
-        videoStreamId: selectedVideoStreamId(request),
-        ...legacySolicitStreamFields(request)
+        webRtcSessionId
       };
     }
 
     async provideAnswer(request) {
       const webRtcSessionId = request?.webRtcSessionId ?? null;
-      const session = webRtcSessions.get(webRtcSessionId);
+      const session = getWebRtcSession(cameraId, webRtcSessionId, this.context);
       recordMatterCommand(cameraId, "WebRtcTransportProvider", "provideAnswer", {
         webRtcSessionId,
         sdpBytes: String(request?.sdp ?? "").length,
@@ -385,7 +413,7 @@ export function createBridgeCameraEndpoint(cameraId, bridgeClient, mediaClient =
     }
 
     async provideIceCandidates(request) {
-      const session = webRtcSessions.get(request?.webRtcSessionId);
+      const session = getWebRtcSession(cameraId, request?.webRtcSessionId, this.context);
       recordMatterCommand(cameraId, "WebRtcTransportProvider", "provideIceCandidates", {
         webRtcSessionId: request?.webRtcSessionId,
         count: request?.iceCandidates?.length ?? 0
@@ -395,14 +423,20 @@ export function createBridgeCameraEndpoint(cameraId, bridgeClient, mediaClient =
         webRtcSessionId: request?.webRtcSessionId,
         count: request?.iceCandidates?.length ?? 0
       });
-      await safeBridgeCall("provide_ice_candidates_forward", cameraId, {
+      const update = await safeBridgeCall("provide_ice_candidates_forward", cameraId, {
         webRtcSessionId: request?.webRtcSessionId,
         location: session?.location ?? null
-      }, () => mediaClient?.whepCandidates?.(cameraId, session?.location, request?.iceCandidates ?? []));
+      }, () => mediaClient?.whepCandidates?.(
+        cameraId,
+        session?.location,
+        request?.iceCandidates ?? [],
+        session?.etag
+      ));
+      if (session && update?.etag) session.etag = update.etag;
     }
 
     async endSession(request) {
-      await matterEndWhepSessionCommand(cameraId, mediaClient, request, this.state);
+      await matterEndWhepSessionCommand(cameraId, mediaClient, request, this.state, this.context);
     }
   }
 
@@ -468,11 +502,12 @@ export function createBridgeCameraEndpoint(cameraId, bridgeClient, mediaClient =
 
   const BridgeCameraDevice = CameraDevice.with(...bridgeBehaviors);
 
-  return new Endpoint(BridgeCameraDevice, cameraEndpointOptions(cameraId, cameraName, { advertisePtz }));
+  return new Endpoint(BridgeCameraDevice, cameraEndpointOptions(cameraId, cameraName, { advertisePtz, advertiseAudio }));
 }
 
 export function cameraEndpointOptions(cameraId, cameraName = cameraId, options = {}) {
   const advertisePtz = options.advertisePtz !== false;
+  const advertiseAudio = options.advertiseAudio !== false;
   const sensor = { width: 1920, height: 1080, fps: 30 };
   const fullResolution = { width: sensor.width, height: sensor.height };
   const mobileResolution = { width: 1280, height: 720 };
@@ -508,8 +543,8 @@ export function cameraEndpointOptions(cameraId, cameraName = cameraId, options =
     cameraAvStreamManagement: {
       maxContentBufferSize: 16 * 1024 * 1024,
       maxNetworkBandwidth: 8_000_000,
-      supportedStreamUsages: [StreamUsage.LiveView, StreamUsage.Recording, StreamUsage.Analysis],
-      streamUsagePriorities: [StreamUsage.LiveView, StreamUsage.Recording, StreamUsage.Analysis],
+      supportedStreamUsages: [StreamUsage.LiveView],
+      streamUsagePriorities: [StreamUsage.LiveView],
       hardPrivacyModeOn: false,
       statusLightEnabled: false,
       statusLightBrightness: ThreeLevelAuto.Auto,
@@ -587,6 +622,15 @@ export function cameraEndpointOptions(cameraId, cameraName = cameraId, options =
       panMin: -180,
       panMax: 180
     };
+  }
+  if (!advertiseAudio) {
+    delete endpointOptions.cameraAvStreamManagement.microphoneCapabilities;
+    delete endpointOptions.cameraAvStreamManagement.allocatedAudioStreams;
+    delete endpointOptions.cameraAvStreamManagement.microphoneMuted;
+    delete endpointOptions.cameraAvStreamManagement.microphoneVolumeLevel;
+    delete endpointOptions.cameraAvStreamManagement.microphoneMaxLevel;
+    delete endpointOptions.cameraAvStreamManagement.microphoneMinLevel;
+    delete endpointOptions.cameraAvStreamManagement.microphoneAgcEnabled;
   }
   return endpointOptions;
 }
@@ -782,7 +826,7 @@ async function sendRequestorAnswer(behavior, cameraId, request, webRtcSessionId,
       webRtcSessionId,
       reason: "no-secure-session-context"
     }, "warn");
-    return;
+    return false;
   }
 
   const endpoint = request?.originatingEndpointId ?? 0;
@@ -803,7 +847,7 @@ async function sendRequestorAnswer(behavior, cameraId, request, webRtcSessionId,
         sdpBytes: String(sdp ?? "").length,
         result
       }, "warn");
-      return;
+      return false;
     }
     logEvent("matter-camera", "requestor_answer_sent", {
       cameraId,
@@ -812,6 +856,7 @@ async function sendRequestorAnswer(behavior, cameraId, request, webRtcSessionId,
       sdpBytes: String(sdp ?? "").length,
       result
     });
+    return true;
   } catch (error) {
     logEvent("matter-camera", "requestor_answer_failed", {
       cameraId,
@@ -819,14 +864,25 @@ async function sendRequestorAnswer(behavior, cameraId, request, webRtcSessionId,
       endpoint,
       ...errorFields(error)
     }, "error");
+    return false;
   }
 }
 
 function scheduleRequestorAnswer(behavior, cameraId, request, webRtcSessionId, sdp) {
   setTimeout(() => {
     void (async () => {
-      await sendRequestorAnswer(behavior, cameraId, request, webRtcSessionId, sdp);
-      await sendRequestorIceCandidates(behavior, cameraId, request, webRtcSessionId, sdp);
+      let delivered = false;
+      for (const retryDelayMs of REQUESTOR_ANSWER_RETRY_DELAYS_MS) {
+        if (retryDelayMs) await new Promise(resolve => setTimeout(resolve, retryDelayMs));
+        delivered = await sendRequestorAnswer(behavior, cameraId, request, webRtcSessionId, sdp);
+        if (delivered) break;
+        logEvent("matter-camera", "requestor_answer_retry", { cameraId, webRtcSessionId, retryDelayMs }, "warn");
+      }
+      if (delivered) {
+        await sendRequestorIceCandidates(behavior, cameraId, request, webRtcSessionId, sdp);
+      } else {
+        markWebRtcSession(cameraId, webRtcSessionId, "answer-delivery-failed");
+      }
     })().catch(error => {
       logEvent("matter-camera", "requestor_answer_schedule_failed", {
         cameraId,
@@ -934,12 +990,37 @@ async function sendProviderOffer(behavior, cameraId, request, webRtcSessionId, m
     return;
   }
 
-  webRtcSessions.set(webRtcSessionId, {
+  setWebRtcSession(cameraId, webRtcSessionId, {
     location: offer.location,
     sdp: offer.sdp
-  });
+  }, behavior.context);
   markWebRtcSession(cameraId, webRtcSessionId, "offer-ready", { location: offer.location });
   await sendRequestorOffer(behavior, cameraId, request, webRtcSessionId, offer.sdp);
+}
+
+function nextWebRtcSessionId(cameraId) {
+  const next = nextWebRtcSessionIds.get(cameraId) ?? 1;
+  nextWebRtcSessionIds.set(cameraId, next + 1);
+  return next;
+}
+
+function webRtcSessionKey(cameraId, webRtcSessionId, context = {}) {
+  const fabricIndex = context.fabric ?? context.session?.fabric?.fabricIndex ?? 0;
+  const peerNodeId = context.session?.peerNodeId?.toString?.() ?? "0";
+  return `${cameraId}:${fabricIndex}:${peerNodeId}:${webRtcSessionId}`;
+}
+
+function getWebRtcSession(cameraId, webRtcSessionId, context = {}) {
+  if (webRtcSessionId == null) return null;
+  return webRtcSessions.get(webRtcSessionKey(cameraId, webRtcSessionId, context));
+}
+
+function setWebRtcSession(cameraId, webRtcSessionId, session, context = {}) {
+  webRtcSessions.set(webRtcSessionKey(cameraId, webRtcSessionId, context), session);
+}
+
+function deleteWebRtcSession(cameraId, webRtcSessionId, context = {}) {
+  webRtcSessions.delete(webRtcSessionKey(cameraId, webRtcSessionId, context));
 }
 
 async function sendRequestorOffer(behavior, cameraId, request, webRtcSessionId, sdp) {

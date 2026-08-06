@@ -7,6 +7,7 @@ from hashlib import sha1
 import os
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 
@@ -75,6 +76,24 @@ def _text_by_local_name(xml_text: str, local_name: str) -> list[str]:
     return values
 
 
+def _rebase_service_url(config: OnvifConfig, address: str | None) -> str | None:
+    """Keep the camera-advertised path on the configured reachable authority."""
+    if not address:
+        return None
+
+    configured = urllib.parse.urlsplit(config.device_service_url)
+    discovered = urllib.parse.urlsplit(address)
+    return urllib.parse.urlunsplit(
+        (
+            configured.scheme,
+            configured.netloc,
+            discovered.path or "/",
+            discovered.query,
+            discovered.fragment,
+        )
+    )
+
+
 def discover_services(config: OnvifConfig) -> OnvifServices:
     body = """
     <tds:GetCapabilities xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
@@ -84,8 +103,14 @@ def discover_services(config: OnvifConfig) -> OnvifServices:
     xml_text = _post(config.device_service_url, config, body)
     addresses = _text_by_local_name(xml_text, "XAddr")
 
-    media = next((addr for addr in addresses if re.search(r"media", addr, re.IGNORECASE)), None)
-    ptz = next((addr for addr in addresses if re.search(r"ptz", addr, re.IGNORECASE)), None)
+    media = _rebase_service_url(
+        config,
+        next((addr for addr in addresses if re.search(r"media", addr, re.IGNORECASE)), None),
+    )
+    ptz = _rebase_service_url(
+        config,
+        next((addr for addr in addresses if re.search(r"ptz", addr, re.IGNORECASE)), None),
+    )
     return OnvifServices(device=config.device_service_url, media=media, ptz=ptz)
 
 

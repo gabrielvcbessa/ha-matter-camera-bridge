@@ -22,13 +22,11 @@ export function dashboardHtml(status) {
     h1 { margin: 0; font-size: 22px; font-weight: 700; }
     h2 { margin: 0; font-size: 16px; }
     main { padding: 24px 28px 40px; display: grid; gap: 18px; }
-    .hero { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(320px, .85fr); gap: 18px; align-items: start; }
+    .workspace { display: grid; grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr); gap: 18px; align-items: start; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
     .status-strip { display: grid; grid-template-columns: repeat(4, minmax(112px, 1fr)); gap: 10px; align-items: stretch; }
     .status-item { min-height: 82px; }
     .status-item .value { overflow-wrap: normal; word-break: normal; }
-    .status-action { grid-column: 1 / -1; display: flex; align-items: center; justify-content: flex-start; }
-    .status-action button { min-height: 44px; }
     .status-context { margin-top: 10px; }
     .camera-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
     .camera-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
@@ -55,6 +53,7 @@ export function dashboardHtml(status) {
     button.danger { background: #fff1f2; border-color: #fecdd3; color: #be123c; }
     button:disabled { opacity: .55; cursor: default; }
     button.primary:disabled { background: #e2e8f0; border-color: #cbd5e1; color: var(--muted); opacity: 1; }
+    button:focus-visible, summary:focus-visible, input:focus-visible, .camera-tab:focus-visible { outline: 3px solid rgba(37, 99, 235, .3); outline-offset: 2px; }
     .icon-button { display: inline-flex; align-items: center; gap: 8px; }
     .icon { display: inline-block; width: 0; height: 0; flex: 0 0 auto; }
     .icon.play { border-top: 6px solid transparent; border-bottom: 6px solid transparent; border-left: 10px solid currentColor; }
@@ -97,17 +96,17 @@ export function dashboardHtml(status) {
     .removal-item { display: flex; gap: 10px; justify-content: space-between; align-items: center; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: #ffffff; }
     .removal-item strong { overflow-wrap: anywhere; }
     .preview { display: grid; gap: 8px; }
-    .preview-frame { display: grid; position: relative; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: #020617; }
+    .preview-frame { display: grid; position: relative; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); }
     .preview-frame > img, .preview-frame > video { grid-area: 1 / 1; }
     .preview-mode { grid-area: 1 / 1; z-index: 2; align-self: start; justify-self: start; margin: 10px; border: 1px solid rgba(226,232,240,.24); border-radius: 999px; padding: 4px 9px; background: rgba(15,23,42,.76); color: #e2e8f0; font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
     .preview-mode.live { border-color: #bbf7d0; color: #15803d; }
     .preview-mode.refresh { border-color: #fed7aa; color: #c2410c; }
     .preview-mode.error { border-color: #fecaca; color: #b91c1c; }
-    .preview-placeholder { grid-area: 1 / 1; display: grid; place-items: center; width: 100%; min-height: 340px; aspect-ratio: 16 / 9; background: linear-gradient(135deg, #020617, #111827); color: #cbd5e1; text-align: center; padding: 18px; line-height: 1.4; overflow-wrap: anywhere; }
+    .preview-placeholder { grid-area: 1 / 1; display: grid; place-items: center; width: 100%; min-height: 280px; aspect-ratio: 16 / 9; background: #f8fafc; color: var(--muted); text-align: center; padding: 18px; line-height: 1.4; overflow-wrap: anywhere; }
     .preview-placeholder[hidden] { display: none; }
-    .preview img { display: block; width: 100%; min-height: 340px; aspect-ratio: 16 / 9; object-fit: cover; background: #020617; }
+    .preview img { display: block; width: 100%; min-height: 280px; aspect-ratio: 16 / 9; object-fit: cover; background: #020617; }
     .preview img[hidden] { display: none; }
-    .preview video { display: block; width: 100%; min-height: 340px; aspect-ratio: 16 / 9; object-fit: cover; background: #020617; }
+    .preview video { display: block; width: 100%; min-height: 280px; aspect-ratio: 16 / 9; object-fit: cover; background: #020617; }
     .preview video[hidden] { display: none; }
     .preview-status { min-height: 18px; color: var(--muted); font-size: 13px; }
     .preview-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: space-between; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: #ffffff; }
@@ -158,8 +157,7 @@ export function dashboardHtml(status) {
     .camera-action-strip .hint { flex: 1 1 260px; }
     .required-dot { color: var(--bad); }
     .pairing-layout { display: grid; gap: 14px; align-items: start; }
-    .pairing-primary { display: grid; gap: 12px; justify-items: center; text-align: center; border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); padding: 16px; width: 100%; margin: 0 auto; }
-    .pairing-primary.ready { border-color: #bfdbfe; background: linear-gradient(180deg, #ffffff, #f8fbff); }
+    .pairing-primary { display: grid; gap: 12px; justify-items: center; text-align: center; padding: 4px 0; width: 100%; margin: 0 auto; }
     .pairing-compact { display: grid; gap: 10px; }
     .pairing-compact .message { padding: 8px 10px; }
     .pairing-copy { display: grid; grid-template-columns: 1fr; gap: 10px; margin: 0; width: min(440px, 100%); }
@@ -167,8 +165,8 @@ export function dashboardHtml(status) {
     .copy-row code { min-height: 36px; display: flex; align-items: center; justify-content: center; text-align: center; }
     .copy-status { min-height: 18px; color: var(--muted); font-size: 13px; }
     .qr-card { display: grid; gap: 8px; justify-items: center; min-width: 0; width: 100%; }
-    .qr-card img { box-sizing: border-box; width: min(420px, 100%); height: auto; aspect-ratio: 1 / 1; border: 1px solid var(--line); border-radius: 8px; background: white; padding: 12px; }
-    .qr-card .label { text-align: center; max-width: 420px; }
+    .qr-card img { box-sizing: border-box; width: min(260px, 100%); height: auto; aspect-ratio: 1 / 1; border: 1px solid var(--line); border-radius: 8px; background: white; padding: 10px; }
+    .qr-card .label { text-align: center; max-width: 280px; }
     .pair-code { font-size: 20px; font-weight: 700; letter-spacing: .02em; }
     .setup-focus { display: none; }
     .setup-focus.active { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
@@ -189,9 +187,8 @@ export function dashboardHtml(status) {
     .status-dot.warn { background: var(--warn); }
     @media (max-width: 820px) {
       header, main { padding-left: 16px; padding-right: 16px; }
-      .hero { grid-template-columns: 1fr; }
+      .workspace { grid-template-columns: 1fr; }
       .status-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .status-action { grid-column: 1 / -1; }
       .live-workspace { grid-template-columns: 1fr; }
       .pairing-layout { grid-template-columns: 1fr; }
       .pairing-copy { grid-template-columns: 1fr; }
@@ -214,7 +211,7 @@ export function dashboardHtml(status) {
       .runtime-details[open] .runtime-popover { position: static; margin-top: 8px; }
       header .primary { width: 100%; }
       main { padding-top: 14px; gap: 14px; }
-      main, .panel, .card, .camera, .hero, .two, .live-workspace, .pairing-layout { min-width: 0; max-width: 100%; }
+      main, .panel, .card, .camera, .workspace, .two, .live-workspace, .pairing-layout { min-width: 0; max-width: 100%; }
       .preview-actions button, .camera-action-strip .button-group button { width: 100%; }
       .message, .hint, .notice { overflow-wrap: anywhere; word-break: normal; }
       .preview-actions, .preview-actions .button-group, .camera-action-strip .button-group { width: 100%; }
@@ -254,18 +251,10 @@ export function dashboardHtml(status) {
     </div>
   </header>
   <main>
-    <section class="hero">
-      <div>
-        <section class="status-strip" id="summary"></section>
-        <div id="runtime-restart-bar" class="change-bar"></div>
-        <section id="setup-focus" class="panel setup-focus"></section>
-      </div>
-      <div class="panel pairing-panel">
-        <h2>Matter Pairing</h2>
-        <div id="pairing"></div>
-      </div>
-    </section>
-    <section class="two">
+    <section class="status-strip" id="summary"></section>
+    <div id="runtime-restart-bar" class="change-bar"></div>
+    <section id="setup-focus" class="panel setup-focus"></section>
+    <section class="workspace">
       <div class="panel live-panel">
         <div class="toolbar">
           <h2>Live Feeds</h2>
@@ -273,9 +262,13 @@ export function dashboardHtml(status) {
         </div>
         <div id="video"></div>
       </div>
+      <div class="panel pairing-panel">
+        <h2>Matter Pairing</h2>
+        <div id="pairing"></div>
+      </div>
     </section>
     <div id="toast" class="toast" hidden role="status" aria-live="polite"></div>
-    <dialog id="camera-dialog" class="camera-dialog">
+    <dialog id="camera-dialog" class="camera-dialog" aria-labelledby="camera-dialog-title">
       <div class="dialog-header">
         <div>
           <h2 id="camera-dialog-title">Camera Feed</h2>
@@ -392,7 +385,7 @@ export function dashboardHtml(status) {
       const offline = cameraStatuses.find(camera => !camera?.probe?.ok || !camera?.probe?.has_video);
       const pending = cameraStatuses.find(camera => camera?.probe?.ok && camera?.probe?.has_video && !camera?.endpoint?.attached);
       if (!cameraCount) {
-        return '<section id="setup-focus" class="panel setup-focus active"><div><h2>Camera Setup</h2><p class="hint">Add one camera feed, then test video and movement before pairing it with Matter.</p></div><span class="button-group"><button type="button" class="primary" onclick="addCamera()">Add Camera</button></span></section>';
+        return '<section id="setup-focus" class="panel setup-focus"></section>';
       }
       if (offline) {
         return '<section id="setup-focus" class="panel setup-focus active"><div><h2>Camera Setup</h2><p class="hint">A saved camera is offline. Open it from Live Feeds to fix RTSP or ONVIF credentials before pairing or testing Matter video.</p></div><span class="button-group"><button type="button" class="primary" onclick="openProblemLiveCamera()">Fix Camera</button><button type="button" onclick="refreshStatus()">Refresh</button></span></section>';
@@ -404,7 +397,7 @@ export function dashboardHtml(status) {
         return '<section id="setup-focus" class="panel setup-focus active"><div><h2>Restart Needed</h2><p class="hint">Video is detected, but Matter has not attached every camera endpoint yet. Restart this add-on from Home Assistant, then refresh this page.</p></div><span class="button-group"><button type="button" onclick="openFirstCameraConfig()">Edit Camera</button><button type="button" class="primary" onclick="refreshStatus()">Refresh after Restart</button></span></section>';
       }
       if (!isCommissioned(commissioning) && commissioning?.pairable) {
-        return '<section id="setup-focus" class="panel setup-focus active"><div><h2>Ready to Pair</h2><p class="hint">Camera video is ready and Matter endpoints are attached. Use the QR code or manual code in Matter Pairing.</p></div><span class="button-group"><button type="button" class="primary" onclick="scrollToPairing()">Open Pairing</button></span></section>';
+        return '<section id="setup-focus" class="panel setup-focus"></section>';
       }
       return '<section id="setup-focus" class="panel setup-focus"></section>';
     }
@@ -426,10 +419,12 @@ export function dashboardHtml(status) {
           \${cameraStatuses.map(camera => {
             const activeClass = camera.id === active.id ? " active" : "";
             const status = cameraRuntimeStatus(camera);
-            return \`<button type="button" class="camera-tab\${activeClass}" role="tab" aria-selected="\${camera.id === active.id ? "true" : "false"}" onclick='selectLiveCamera(\${jsString(camera.id)})'><span class="status-dot \${status.klass}"></span><span class="camera-tab-name">\${escapeHtml(cameraDisplayName(camera))}</span><span class="label">\${escapeHtml(status.label)}</span></button>\`;
+            const tabId = "camera-tab-" + safeId(camera.id);
+            const panelId = "camera-panel-" + safeId(camera.id);
+            return \`<button id="\${tabId}" type="button" class="camera-tab\${activeClass}" role="tab" aria-selected="\${camera.id === active.id ? "true" : "false"}" aria-controls="\${panelId}" tabindex="\${camera.id === active.id ? "0" : "-1"}" onclick='selectLiveCamera(\${jsString(camera.id)})' onkeydown='handleCameraTabKey(event, \${jsString(camera.id)})'><span class="status-dot \${status.klass}"></span><span class="camera-tab-name">\${escapeHtml(cameraDisplayName(camera))}</span><span class="label">\${escapeHtml(status.label)}</span></button>\`;
           }).join("")}
         </div>
-        <div class="camera camera-live">
+        <div id="camera-panel-\${safeId(active.id)}" class="camera camera-live" role="tabpanel" aria-labelledby="camera-tab-\${safeId(active.id)}">
           <div class="live-header">
             <div class="camera-title">
               <strong>\${escapeHtml(cameraDisplayName(active))}</strong>
@@ -543,7 +538,6 @@ export function dashboardHtml(status) {
 
     function renderSummaryStrip(commissioning, cameraStatuses, cameraCount, attachedCount, videoCount, configuredPersonCount, personCount) {
       const camera = cameraOverallStatus(cameraStatuses, cameraCount, attachedCount, videoCount);
-      const action = primaryNextAction(commissioning, cameraStatuses, cameraCount, attachedCount, videoCount);
       const extras = [];
       if (cameraCount && attachedCount !== cameraCount) extras.push(\`\${attachedCount} / \${cameraCount} camera endpoints attached\`);
       if (cameraCount && videoCount !== cameraCount) extras.push(\`\${videoCount} / \${cameraCount} video sources detected\`);
@@ -553,7 +547,6 @@ export function dashboardHtml(status) {
         \${summaryItem("Camera", camera.label, camera.klass)}
         \${summaryItem("Matter", matterNodeLabel(commissioning, cameraCount, attachedCount, videoCount), matterNodeClass(commissioning, cameraCount, attachedCount, videoCount))}
         \${summaryItem("Live Relay", state.mediaHealth?.ok ? "Online" : "Offline", cls(state.mediaHealth?.ok))}
-        <div class="status-action"><button type="button" class="\${action.primary ? "primary" : ""}" onclick="\${action.onclick}">\${escapeHtml(action.label)}</button></div>
         \${extras.length ? '<div class="status-context hint" style="grid-column:1 / -1">' + extras.map(escapeHtml).join(" · ") + '</div>' : ""}
       \`;
     }
@@ -568,15 +561,6 @@ export function dashboardHtml(status) {
       if (videoCount < cameraCount) return { label: "Offline", klass: "bad" };
       if (attachedCount < cameraCount) return { label: "Pending restart", klass: "warn" };
       return { label: "Ready", klass: "ok" };
-    }
-
-    function primaryNextAction(commissioning, cameraStatuses, cameraCount, attachedCount, videoCount) {
-      if (!cameraCount) return { label: "Add Camera", onclick: "addCamera()", primary: true };
-      if (videoCount < cameraCount) return { label: "Fix Camera", onclick: "openProblemLiveCamera()", primary: true };
-      if (!commissioning?.started || attachedCount < cameraCount) return { label: "Restart + Refresh", onclick: "refreshStatus()", primary: true };
-      if (!isCommissioned(commissioning) && commissioning?.pairable) return { label: "Pair", onclick: "scrollToPairing()", primary: true };
-      if (cameraStatuses.length) return { label: "Open Live", onclick: "scrollToLive()", primary: false };
-      return { label: "Refresh", onclick: "refreshStatus()", primary: false };
     }
 
     function incompleteCameraDraft(camera) {
@@ -992,16 +976,9 @@ export function dashboardHtml(status) {
             \${cameraEditorHealth(camera, status)}
             \${cameraSetupActions(camera, status, index)}
           <fieldset>
-            <legend>Identity</legend>
+            <legend>Camera</legend>
             <div class="form-grid">
               \${input(index, "name", "Display Name", camera.name, "Front Door", "text", "Name shown by Matter controllers.", true)}
-              \${input(index, "id", "Camera ID", camera.id, "front_door", "text", "Stable Matter endpoint id. Use letters, numbers, underscores, or hyphens.", true)}
-            </div>
-            <p class="field-help">The display name is what Matter controllers see. Changing the camera ID after pairing can create a new endpoint. <button type="button" onclick="generateCameraIdFromName(\${index})">Generate ID from name</button></p>
-          </fieldset>
-          <fieldset>
-            <legend>Video Stream</legend>
-            <div class="form-grid">
               \${input(index, "rtsp_url", "RTSP URL", camera.rtsp_url, "rtsp://user:password@camera-ip:554/av_stream/ch0", "text", "Plain camera RTSP URL used for snapshots, preview, and Matter camera media.", true)}
             </div>
             \${rtspGuidance(camera)}
@@ -1016,17 +993,18 @@ export function dashboardHtml(status) {
             </div>
             <p class="field-help">If ONVIF uses the same address or login as RTSP, copy it from the stream URL: <button type="button" onclick="useRtspHostForOnvif(\${index})">Copy RTSP host</button> <button type="button" onclick="useRtspLoginForOnvif(\${index})">Copy RTSP login</button></p>
           </fieldset>
-          <fieldset>
-            <legend>Matter Capabilities</legend>
+          <details class="advanced-block">
+            <summary>Advanced Matter settings</summary>
+            <div class="form-grid" style="margin-top:12px">
+              \${input(index, "id", "Camera ID", camera.id, "front_door", "text", "Stable Matter endpoint id. Use letters, numbers, underscores, or hyphens.", true)}
+            </div>
+            <p class="field-help">Changing this ID after pairing can create a new endpoint. <button type="button" onclick="generateCameraIdFromName(\${index})">Generate ID from name</button></p>
             <div class="form-grid">
               \${checkbox(index, "matter.advertise_ptz", "Expose PTZ controls to Matter controllers", camera.matter?.advertise_ptz !== false)}
               \${checkbox(index, "matter.advertise_audio", "Expose audio stream support", camera.matter?.advertise_audio !== false)}
               \${checkbox(index, "matter.advertise_person_detection", "Create Matter person presence sensor", camera.matter?.advertise_person_detection === true)}
             </div>
             <p class="label">Changing Matter-facing controls or sensors requires restarting this add-on from the Home Assistant add-on page.</p>
-          </fieldset>
-          <details class="advanced-block">
-            <summary>Advanced media override</summary>
             <div class="form-grid" style="margin-top:12px">
               \${input(index, "media_source", "WHEP Media Source Override", "", camera.media_source_set ? "Leave blank to keep " + camera.media_source_redacted : "Leave blank to use RTSP URL")}
             </div>
@@ -1322,7 +1300,7 @@ export function dashboardHtml(status) {
       const ptzExposed = config?.matter?.advertise_ptz !== false;
       const observed = matterPtzObserved(cameraId);
       const pathText = ptzExposed
-        ? "Dashboard buttons exercise the same add-on Matter PTZ command path and then relay movement through ONVIF. Controller apps decide whether to show Matter camera PTZ controls."
+        ? "Dashboard buttons test this camera's ONVIF movement through the bridge command handler. A real Matter round trip is recorded only when a paired controller sends a PTZ command; controller apps decide whether to show those controls."
         : "PTZ is disabled for this camera. Live video and snapshots still work; enable mechanical PTZ and set ONVIF details if this camera can move.";
       return \`
         <div class="notice">
@@ -1662,6 +1640,22 @@ export function dashboardHtml(status) {
       activeLiveCameraId = cameraId;
       render();
     };
+    window.handleCameraTabKey = async (event, cameraId) => {
+      const tabs = [...document.querySelectorAll('.camera-tabs [role="tab"]')];
+      const currentIndex = tabs.findIndex(tab => tab.id === "camera-tab-" + safeId(cameraId));
+      if (currentIndex < 0 || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const nextIndex = event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? tabs.length - 1
+          : (currentIndex + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+      const nextId = tabs[nextIndex]?.id?.replace(/^camera-tab-/, "");
+      const camera = (state.cameras ?? []).find(item => safeId(item.id) === nextId);
+      if (!camera) return;
+      await window.selectLiveCamera(camera.id);
+      el("camera-tab-" + safeId(camera.id))?.focus();
+    };
     window.openLiveCamera = async cameraId => {
       if (cameraId !== activeLiveCameraId) {
         await stopAllLivePreviews();
@@ -1750,7 +1744,7 @@ export function dashboardHtml(status) {
           setPreviewPlaceholder(cameraId, false);
           video.hidden = false;
           if (image) image.hidden = true;
-          status.textContent = "Matter live preview is receiving video frames.";
+          status.textContent = "Live preview is receiving video frames.";
           setPreviewMode(cameraId, "live", "Live");
         };
         video.onloadeddata = showVideo;
@@ -1761,7 +1755,7 @@ export function dashboardHtml(status) {
           const connection = peer.connectionState || "new";
           const ice = peer.iceConnectionState || "new";
           if (connection === "failed" || ice === "failed") {
-            status.textContent = "Matter live preview failed before video frames. WebRTC: " + connection + ", ICE: " + ice + ".";
+            status.textContent = "Live preview failed before video frames. WebRTC: " + connection + ", ICE: " + ice + ".";
             setPreviewMode(cameraId, "error", "Live error");
           } else if (connection === "connected" || ice === "connected" || ice === "completed") {
             status.textContent = "Matter WebRTC connected. Waiting for video frames...";
@@ -1786,7 +1780,7 @@ export function dashboardHtml(status) {
           void sendWhepCandidate(cameraId, preview, fragment);
         };
         const offer = await peer.createOffer();
-        await peer.setLocalDescription(offer);
+        await peer.setLocalDescription({ type: offer.type, sdp: preferH264(offer.sdp) });
         await prewarmLivePreview(cameraId).catch(error => {
           status.textContent = "Relay prewarm warning: " + friendlyError(error.message) + ". Starting live preview...";
         });
@@ -1812,7 +1806,7 @@ export function dashboardHtml(status) {
         syncPreviewControls(cameraId);
       } catch (error) {
         await window.stopLivePreview(cameraId);
-        status.textContent = "Matter live preview failed: " + friendlyError(error.message);
+        status.textContent = "Live preview failed: " + friendlyError(error.message);
         setPreviewMode(cameraId, "error", "Live error");
       }
     };
@@ -1880,6 +1874,35 @@ export function dashboardHtml(status) {
       }
       throw lastError ?? new Error("No prewarm route is available.");
     }
+    function preferH264(sdp) {
+      if (!sdp) return sdp;
+      const sections = sdp.split(/(?=m=)/);
+      return sections.map(section => {
+        if (!section.startsWith("m=video ")) return section;
+
+        const lines = section.split(/\\r?\\n/);
+        const media = lines[0].split(" ");
+        const payloads = media.slice(3);
+        const codecByPayload = new Map();
+        const aptByPayload = new Map();
+
+        for (const line of lines) {
+          const rtpmap = line.match(/^a=rtpmap:(\d+)\s+([^/]+)/i);
+          if (rtpmap) codecByPayload.set(rtpmap[1], rtpmap[2].toUpperCase());
+          const fmtp = line.match(/^a=fmtp:(\d+)\s+.*(?:^|[ ;])apt=(\d+)/i);
+          if (fmtp) aptByPayload.set(fmtp[1], fmtp[2]);
+        }
+
+        const h264 = payloads.filter(payload => codecByPayload.get(payload) === "H264");
+        if (!h264.length) return section;
+
+        const h264Rtx = payloads.filter(payload => codecByPayload.get(payload) === "RTX" && h264.includes(aptByPayload.get(payload)));
+        const preferred = [...h264, ...h264Rtx];
+        const rest = payloads.filter(payload => !preferred.includes(payload));
+        lines[0] = [...media.slice(0, 3), ...preferred, ...rest].join(" ");
+        return lines.join("\\r\\n");
+      }).join("");
+    }
     function matterCameraRoute(cameraId) {
       return "/api/matter/cameras/" + encodeURIComponent(cameraId);
     }
@@ -1905,7 +1928,7 @@ export function dashboardHtml(status) {
           relay = " Relay: " + (active.connectionState ?? "unknown") + ", ICE: " + (active.iceConnectionState ?? "unknown") + ".";
         }
       } catch {}
-      status.textContent = "Matter live preview has not received video frames yet. Browser WebRTC: " + (peer?.connectionState ?? "unknown") + ", ICE: " + (peer?.iceConnectionState ?? "unknown") + "." + relay;
+      status.textContent = "Live preview has not received video frames yet. Browser WebRTC: " + (peer?.connectionState ?? "unknown") + ", ICE: " + (peer?.iceConnectionState ?? "unknown") + "." + relay;
       setPreviewMode(cameraId, "error", "No frames");
     }
     window.loadSnapshot = async cameraId => {
@@ -2021,14 +2044,14 @@ export function dashboardHtml(status) {
     }
     window.checkPtz = async (cameraId, statusId = "") => {
       const status = el(statusId || "ptz-status-" + safeId(cameraId));
-      status.textContent = "Checking Matter PTZ path...";
+      status.textContent = "Checking camera movement through the bridge...";
       try {
         const response = await fetch("/api/matter/cameras/" + encodeURIComponent(cameraId) + "/ptz/status?t=" + Date.now());
         const payload = await response.json();
         if (!response.ok || payload.ok === false) throw new Error(payload.error ?? "PTZ status failed");
-        status.textContent = "Matter PTZ path reached the camera.";
+        status.textContent = "The bridge reached the camera's ONVIF PTZ service.";
       } catch (error) {
-        status.textContent = "Matter PTZ path failed: " + error.message;
+        status.textContent = "Camera movement check failed: " + error.message;
       }
     };
     window.movePtz = async (cameraId, direction, statusId = "") => {
@@ -2051,9 +2074,9 @@ export function dashboardHtml(status) {
       const status = el(statusId || "ptz-status-" + safeId(cameraId));
       try {
         await fetch("/api/matter/cameras/" + encodeURIComponent(cameraId) + "/ptz/stop", { method: "POST" });
-        if (status) status.textContent = "Matter PTZ stopped.";
+        if (status) status.textContent = "Camera movement stopped.";
       } catch {
-        if (status) status.textContent = "Matter PTZ stop was sent; waiting for camera.";
+        if (status) status.textContent = "Stop was sent; waiting for the camera.";
       }
     };
     window.tapPtz = async (event, cameraId, direction, statusId = "") => {
@@ -2070,9 +2093,9 @@ export function dashboardHtml(status) {
         const response = await fetch("/api/matter/cameras/" + encodeURIComponent(cameraId) + "/ptz/" + encodeURIComponent(direction) + "?" + query.toString(), { method: "POST" });
         const payload = await response.json();
         if (!response.ok || payload.ok === false) throw new Error(payload.error ?? deepErrorMessage(payload.payload ?? payload));
-        status.textContent = "Matter PTZ " + direction + " succeeded.";
+        status.textContent = "Camera moved " + direction + ".";
       } catch (error) {
-        status.textContent = "Matter PTZ " + direction + " failed: " + friendlyError(error.message);
+        status.textContent = "Camera movement " + direction + " failed: " + friendlyError(error.message);
       }
     }
     window.addCamera = () => {

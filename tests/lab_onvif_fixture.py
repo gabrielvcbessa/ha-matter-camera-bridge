@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import os
+from threading import Lock
+from xml.etree import ElementTree
 
 
 HOST = os.environ.get("ONVIF_FIXTURE_HOST", "0.0.0.0")
@@ -32,6 +34,9 @@ def envelope(body: str) -> bytes:
 
 
 class Handler(BaseHTTPRequestHandler):
+    position = {"pan": 0.0, "tilt": 0.0, "zoom": 1.0}
+    position_lock = Lock()
+
     def do_POST(self) -> None:  # noqa: N802
         length = int(self.headers.get("Content-Length", "0"))
         request = self.rfile.read(length).decode("utf-8", errors="replace")
@@ -63,12 +68,16 @@ class Handler(BaseHTTPRequestHandler):
       </trt:MediaUri>
     </trt:GetStreamUriResponse>"""
         elif "GetStatus" in request:
-            body = """
+            with self.position_lock:
+                pan = self.position["pan"]
+                tilt = self.position["tilt"]
+                zoom = self.position["zoom"]
+            body = f"""
     <tptz:GetStatusResponse>
       <tptz:PTZStatus>
         <tt:Position>
-          <tt:PanTilt x="0.0" y="0.0" />
-          <tt:Zoom x="1.0" />
+          <tt:PanTilt x="{pan}" y="{tilt}" />
+          <tt:Zoom x="{zoom}" />
         </tt:Position>
         <tt:MoveStatus>
           <tt:PanTilt>IDLE</tt:PanTilt>
@@ -77,12 +86,25 @@ class Handler(BaseHTTPRequestHandler):
       </tptz:PTZStatus>
     </tptz:GetStatusResponse>"""
         elif "ContinuousMove" in request:
+            pan, tilt, zoom = movement_values(request, "Velocity")
+            with self.position_lock:
+                self.position["pan"] += pan
+                self.position["tilt"] += tilt
+                self.position["zoom"] += zoom
             body = """
     <tptz:ContinuousMoveResponse />"""
         elif "RelativeMove" in request:
+            pan, tilt, zoom = movement_values(request, "Translation")
+            with self.position_lock:
+                self.position["pan"] += pan
+                self.position["tilt"] += tilt
+                self.position["zoom"] += zoom
             body = """
     <tptz:RelativeMoveResponse />"""
         elif "AbsoluteMove" in request:
+            pan, tilt, zoom = movement_values(request, "Position")
+            with self.position_lock:
+                self.position.update(pan=pan, tilt=tilt, zoom=zoom)
             body = """
     <tptz:AbsoluteMoveResponse />"""
         elif "Stop" in request:
@@ -104,6 +126,25 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: object) -> None:
         if os.environ.get("ONVIF_FIXTURE_ACCESS_LOG") == "1":
             super().log_message(format, *args)
+
+
+def movement_values(xml_text: str, container_name: str) -> tuple[float, float, float]:
+    root = ElementTree.fromstring(xml_text)
+    container = next(
+        (element for element in root.iter() if element.tag.rsplit("}", 1)[-1] == container_name),
+        None,
+    )
+    if container is None:
+        return 0.0, 0.0, 0.0
+    pan = tilt = zoom = 0.0
+    for element in container.iter():
+        name = element.tag.rsplit("}", 1)[-1]
+        if name == "PanTilt":
+            pan = float(element.attrib.get("x", 0))
+            tilt = float(element.attrib.get("y", 0))
+        elif name == "Zoom":
+            zoom = float(element.attrib.get("x", 0))
+    return pan, tilt, zoom
 
 
 def main() -> None:

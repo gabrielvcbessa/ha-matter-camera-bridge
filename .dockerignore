@@ -1,6 +1,10 @@
 .git
 .env
 .pycache
+.artifacts
+.lab
+.local-matter-lab
+.tmp
 __pycache__
 *.pyc
 
@@ -9,5 +13,6 @@ media/__pycache__
 relay
 snapshots
 sidecar/node_modules
+stream-to-matter/sidecar/node_modules
 
 .DS_Store

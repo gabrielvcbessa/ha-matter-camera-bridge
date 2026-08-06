@@ -80,6 +80,13 @@ function trackedInput(value = "") {
   };
 }
 
+test("generated dashboard script compiles", () => {
+  const html = dashboardHtml(sampleStatus);
+  const match = html.match(/<script>([\s\S]*)<\/script>/);
+  assert.ok(match, "dashboard should contain an inline script");
+  assert.doesNotThrow(() => new vm.Script(match[1]));
+});
+
 test("dashboard renders PTZ controls without forbidden Home Assistant copy", () => {
   const html = dashboardHtml(sampleStatus);
 
@@ -100,7 +107,7 @@ test("dashboard renders PTZ controls without forbidden Home Assistant copy", () 
   assert.match(html, /header \{ align-items: flex-start; flex-direction: column; \}/);
   assert.match(html, /header \.primary \{ width: 100%; \}/);
   assert.match(html, /main \{ padding-top: 14px; gap: 14px; \}/);
-  assert.match(html, /main, \.panel, \.card, \.camera, \.hero, \.two, \.live-workspace, \.pairing-layout \{ min-width: 0; max-width: 100%; \}/);
+  assert.match(html, /main, \.panel, \.card, \.camera, \.workspace, \.two, \.live-workspace, \.pairing-layout \{ min-width: 0; max-width: 100%; \}/);
   assert.match(html, /\.preview-actions button, \.camera-action-strip \.button-group button \{ width: 100%; \}/);
   assert.match(html, /\.message, \.hint, \.notice \{ overflow-wrap: anywhere; word-break: normal; \}/);
   assert.match(html, /\.copy-row \{ grid-template-columns: minmax\(0, 1fr\); \}/);
@@ -111,13 +118,13 @@ test("dashboard renders PTZ controls without forbidden Home Assistant copy", () 
   assert.match(html, /<section class="status-strip" id="summary"><\/section>/);
   assert.match(html, /\.status-strip \{ display: grid; grid-template-columns: repeat\(4, minmax\(112px, 1fr\)\);/);
   assert.match(html, /\.status-item \.value \{ overflow-wrap: normal; word-break: normal; \}/);
-  assert.match(html, /\.status-action \{ grid-column: 1 \/ -1; display: flex;/);
+  assert.doesNotMatch(html, /status-action/);
   assert.match(html, /function renderSummaryStrip/);
   assert.match(html, /summaryItem\("Bridge"/);
   assert.match(html, /summaryItem\("Camera"/);
   assert.match(html, /summaryItem\("Matter"/);
   assert.match(html, /summaryItem\("Live Relay"/);
-  assert.match(html, /function primaryNextAction/);
+  assert.doesNotMatch(html, /function primaryNextAction/);
   assert.match(html, /function cameraOverallStatus/);
   assert.doesNotMatch(html, /Person Sensors/);
   assert.doesNotMatch(html, /function renderWorkflow/);
@@ -126,10 +133,14 @@ test("dashboard renders PTZ controls without forbidden Home Assistant copy", () 
   assert.match(html, /renderGuidance\(\)/);
   assert.match(html, /id="setup-focus" class="panel setup-focus"/);
   assert.match(html, /function renderSetupFocus/);
-  assert.match(html, /Add one camera feed, then test video and movement before pairing it with Matter/);
-  assert.match(html, /Ready to Pair/);
-  assert.ok(html.indexOf('class="hero"') < html.indexOf('id="video"'));
-  assert.ok(html.indexOf('id="pairing"') < html.indexOf('id="video"'));
+  assert.doesNotMatch(html, /Add one camera feed, then test video and movement before pairing it with Matter/);
+  assert.ok(html.indexOf('class="workspace"') < html.indexOf('id="video"'));
+  assert.ok(html.indexOf('id="video"') < html.indexOf('id="pairing"'));
+  assert.match(html, /aria-labelledby="camera-dialog-title"/);
+  assert.match(html, /aria-controls="\$\{panelId\}"/);
+  assert.match(html, /role="tabpanel" aria-labelledby="camera-tab-\$\{safeId\(active\.id\)\}"/);
+  assert.match(html, /function handleCameraTabKey|window\.handleCameraTabKey/);
+  assert.match(html, /button:focus-visible, summary:focus-visible, input:focus-visible, \.camera-tab:focus-visible/);
   assert.match(html, /function configuredCameraCount/);
   assert.match(html, /Array\.isArray\(state\.cameraConfig\?\.cameras\) \? state\.cameraConfig\.cameras\.length : 0/);
   assert.match(html, /renderPairing\(c, cameraCount, attachedCount, videoCount\)/);
@@ -406,9 +417,10 @@ test("dashboard renders PTZ controls without forbidden Home Assistant copy", () 
   assert.match(html, /includeActions \? probeRepairActions/);
   assert.match(html, /stopLivePreview\(\$\{jsString\(active\.id\)\}\)' disabled/);
   assert.match(html, /stopFrameFeed\(\$\{jsString\(active\.id\)\}\)' disabled/);
-  assert.match(html, /Video Stream/);
+  assert.match(html, /<legend>Camera<\/legend>/);
+  assert.match(html, /<summary>Advanced Matter settings<\/summary>/);
   assert.match(html, /ONVIF Movement/);
-  assert.match(html, /Dashboard buttons exercise the same add-on Matter PTZ command path and then relay movement through ONVIF/);
+  assert.match(html, /Dashboard buttons test this camera's ONVIF movement through the bridge command handler/);
   assert.doesNotMatch(html, /Camera setup progress/);
   assert.match(html, /const streamProbeKnown = Boolean\(status\?\.probe\)/);
   assert.match(html, /const streamProbeOk = Boolean\(status\?\.probe\?\.ok\)/);
@@ -450,7 +462,7 @@ test("dashboard renders PTZ controls without forbidden Home Assistant copy", () 
   assert.match(html, /canOperate && cameraId && cameraPtzConfigured\(config\)/);
   assert.match(html, /ptzSupportPanel\(camera\)/);
   assert.match(html, /cameras\.find\(item => item\.id === cameraId\) \?\? camera/);
-  assert.match(html, /Dashboard buttons exercise the same add-on Matter PTZ command path and then relay movement through ONVIF/);
+  assert.match(html, /Dashboard buttons test this camera's ONVIF movement through the bridge command handler/);
   assert.match(html, /Live video and snapshots still work; enable mechanical PTZ and set ONVIF details if this camera can move/);
   assert.match(html, /pending save\/restart/);
   assert.match(html, /required-dot/);
@@ -543,8 +555,8 @@ test("dashboard renders PTZ controls without forbidden Home Assistant copy", () 
   assert.match(html, /message bad/);
   assert.match(html, /message p \+ p/);
   assert.match(html, /<p>' \+ escapeHtml\(error\) \+ '<\/p>/);
-  assert.match(html, /\.hero \{ display: grid; grid-template-columns: minmax\(0, 1\.15fr\) minmax\(320px, \.85fr\); gap: 18px; align-items: start; \}/);
-  assert.match(html, /\.hero \{ grid-template-columns: 1fr; \}/);
+  assert.match(html, /\.workspace \{ display: grid; grid-template-columns: minmax\(0, 2fr\) minmax\(300px, 1fr\); gap: 18px; align-items: start; \}/);
+  assert.match(html, /\.workspace \{ grid-template-columns: 1fr; \}/);
   assert.match(html, /pairing-compact/);
   assert.match(html, /function renderPairing/);
   assert.match(html, /\.two \{ display: grid; grid-template-columns: 1fr; gap: 18px; align-items: start; \}/);
@@ -552,7 +564,7 @@ test("dashboard renders PTZ controls without forbidden Home Assistant copy", () 
   assert.match(html, /\.live-control-column \.ptz-actions \{ grid-template-columns: 1fr; \}/);
   assert.match(html, /\.live-workspace \{ grid-template-columns: 1fr; \}/);
   assert.match(html, /width: 100%; margin: 0 auto/);
-  assert.match(html, /width: min\(420px, 100%\)/);
+  assert.match(html, /width: min\(260px, 100%\)/);
   assert.match(html, /#summary\.grid \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\); gap: 6px; \}/);
   assert.match(html, /#summary \.card \{ min-height: 54px; padding: 8px 10px; \}/);
   assert.match(html, /\.qr-card img \{ width: min\(240px, 100%\); \}/);
@@ -1007,7 +1019,7 @@ test("dashboard first-run state does not show zero-camera success", () => {
   assert.match(html, /Start with the plain camera RTSP URL and ONVIF host/);
   assert.match(html, /id="add-feed">Add Camera/);
   assert.match(html, /if \(!cameraCount\) return "Matter is ready, but no cameras are configured yet/);
-  assert.match(html, /if \(!cameraCount\) return \{ label: "Add Camera", onclick: "addCamera\(\)", primary: true \}/);
+  assert.doesNotMatch(html, /function primaryNextAction/);
   assert.match(html, /if \(!cameraCount\) return \{ label: "No cameras", klass: "warn" \}/);
   assert.doesNotMatch(html, /0 \/ 0 attached/);
   assert.doesNotMatch(html, /0 \/ 0 detected/);

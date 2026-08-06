@@ -13,6 +13,8 @@ DEFAULT_MATTER_DISCRIMINATOR=3840
 BRIDGE_PORT="${STREAM_TO_MATTER_PORT:-8080}"
 SIDECAR_PORT="${MATTER_SIDECAR_PORT:-8090}"
 WHEP_PORT="${WHEP_RELAY_PORT:-8889}"
+GO2RTC_API_PORT="${GO2RTC_API_PORT:-11984}"
+GO2RTC_WEBRTC_PORT="${GO2RTC_WEBRTC_PORT:-18555}"
 BRIDGE_HEALTH_URL="http://127.0.0.1:${BRIDGE_PORT}/health"
 BRIDGE_MANIFEST_URL="http://127.0.0.1:${BRIDGE_PORT}/matter/manifest"
 
@@ -38,7 +40,8 @@ export MATTER_DISCRIMINATOR="$(json_get "${CONFIG_PATH}" matter_discriminator)"
 export MATTER_PORT="$(json_get "${CONFIG_PATH}" matter_port)"
 export MATTER_TCP="$(json_get "${CONFIG_PATH}" matter_tcp)"
 export MATTER_LISTENING_ADDRESS_IPV4="$(json_get "${CONFIG_PATH}" matter_listen_ipv4)"
-export WHEP_ADVERTISE_IP="$(json_get "${CONFIG_PATH}" whep_advertise_ip)"
+CONFIGURED_WHEP_ADVERTISE_IP="$(json_get "${CONFIG_PATH}" whep_advertise_ip)"
+export WHEP_ADVERTISE_IP="${CONFIGURED_WHEP_ADVERTISE_IP:-${WHEP_ADVERTISE_IP:-}}"
 export MATTER_MDNS_INTERFACE="$(json_get "${CONFIG_PATH}" matter_mdns_interface)"
 export MATTER_MDNS_IPV6="$(json_get "${CONFIG_PATH}" matter_mdns_ipv6)"
 export MATTER_PRODUCT_NAME="$(json_get "${CONFIG_PATH}" product_name)"
@@ -67,6 +70,28 @@ fi
 
 if [[ -z "${WHEP_ADVERTISE_IP}" && -n "${MATTER_LISTENING_ADDRESS_IPV4}" ]]; then
   export WHEP_ADVERTISE_IP="${MATTER_LISTENING_ADDRESS_IPV4}"
+fi
+
+if [[ -z "${WHEP_ADVERTISE_IP}" ]]; then
+  export WHEP_ADVERTISE_IP="$(python3 - <<'PY'
+import socket
+
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+try:
+    sock.connect(("1.1.1.1", 53))
+    address = sock.getsockname()[0]
+    print("" if address.startswith("127.") else address)
+except OSError:
+    print("")
+finally:
+    sock.close()
+PY
+)"
+  if [[ -n "${WHEP_ADVERTISE_IP}" ]]; then
+    log "Auto-detected WHEP/WebRTC media address ${WHEP_ADVERTISE_IP}"
+  else
+    log "Could not auto-detect a WHEP/WebRTC media address; go2rtc will advertise its host interfaces"
+  fi
 fi
 
 if [[ -n "${WHEP_ADVERTISE_IP}" ]]; then
@@ -183,6 +208,42 @@ log "Matter commissioning credentials source: ${MATTER_CREDENTIAL_SOURCE}"
 
 mkdir -p /data/snapshots /data/relay "${MATTER_STORAGE_ROOT}"
 
+if command -v go2rtc >/dev/null 2>&1; then
+  GO2RTC_ADVERTISE_IP="${WHEP_ADVERTISE_IP}"
+  GO2RTC_CONFIG=/data/go2rtc.yaml
+  log "Writing go2rtc config at ${GO2RTC_CONFIG}"
+  python3 - "${GO2RTC_CONFIG}" "${GO2RTC_API_PORT}" "${GO2RTC_WEBRTC_PORT}" "${GO2RTC_ADVERTISE_IP}" <<'PY'
+from pathlib import Path
+import sys
+
+path, api_port, webrtc_port, advertise_ip = sys.argv[1:]
+Path(path).parent.mkdir(parents=True, exist_ok=True)
+Path(path).write_text(
+    "\n".join(
+        [
+            "api:",
+            f'  listen: "127.0.0.1:{api_port}"',
+            "webrtc:",
+            f'  listen: ":{webrtc_port}"',
+            *(
+                ["  candidates:", f'    - "{advertise_ip}:{webrtc_port}"']
+                if advertise_ip
+                else []
+            ),
+            "  ice_servers: []",
+            "streams: {}",
+            "",
+        ]
+    ),
+    encoding="utf-8",
+)
+PY
+  export GO2RTC_BASE_URL="http://127.0.0.1:${GO2RTC_API_PORT}"
+  export GO2RTC_WEBRTC_PORT
+else
+  log "go2rtc is not available; falling back to the built-in aiortc relay"
+fi
+
 log "Starting Home Assistant add-on"
 log "Camera registry: ${CAMERA_CONFIG}"
 if [[ ! -f "${CAMERA_CONFIG}" ]]; then
@@ -247,6 +308,13 @@ trap cleanup TERM INT
 log "Launching bridge on http://0.0.0.0:${BRIDGE_PORT}"
 python3 -m stream_to_matter.server &
 bridge_pid=$!
+
+go2rtc_pid=
+if [[ -n "${GO2RTC_BASE_URL:-}" ]]; then
+  log "Launching go2rtc on ${GO2RTC_BASE_URL} with WebRTC candidates on ${GO2RTC_ADVERTISE_IP}:${GO2RTC_WEBRTC_PORT}"
+  go2rtc -config "${GO2RTC_CONFIG}" &
+  go2rtc_pid=$!
+fi
 
 log "Launching WHEP relay on http://0.0.0.0:${WHEP_PORT}"
 python3 /app/media/whep_relay.py &
@@ -313,6 +381,10 @@ npm start &
 sidecar_pid=$!
 
 log "Startup complete. Use /status for diagnostics and /matter/onboarding for pairing."
-wait -n "${bridge_pid}" "${whep_pid}" "${sidecar_pid}"
+if [[ -n "${go2rtc_pid}" ]]; then
+  wait -n "${bridge_pid}" "${go2rtc_pid}" "${whep_pid}" "${sidecar_pid}"
+else
+  wait -n "${bridge_pid}" "${whep_pid}" "${sidecar_pid}"
+fi
 log "A child process exited; shutting down add-on"
 cleanup
