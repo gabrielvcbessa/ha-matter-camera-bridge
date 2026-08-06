@@ -203,34 +203,72 @@ export function dashboardHtml(status) {
       .qr-card img { width: min(240px, 100%); }
     }
     @media (max-width: 520px) {
-      header { align-items: flex-start; flex-direction: column; }
-      .header-actions { width: 100%; justify-content: stretch; }
-      .runtime-badge { flex: 1 1 auto; text-align: center; }
-      .runtime-details { width: 100%; }
+      header { align-items: flex-start; flex-direction: column; padding: 14px 16px; gap: 12px; }
+      h1 { font-size: 20px; line-height: 1.2; }
+      .header-actions { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+      .runtime-badge { flex: 1 1 auto; text-align: center; white-space: normal; overflow-wrap: anywhere; }
+      .runtime-details { width: auto; min-width: 0; }
+      .runtime-details[open] { grid-column: 1 / -1; }
       .runtime-details summary { text-align: center; }
-      .runtime-details[open] .runtime-popover { position: static; margin-top: 8px; }
-      header .primary { width: 100%; }
-      main { padding-top: 14px; gap: 14px; }
+      .runtime-details[open] .runtime-popover { position: static; width: 100%; min-width: 0; margin-top: 8px; overflow-wrap: anywhere; }
+      header .primary { width: auto; min-width: 104px; }
+      main { padding: 12px 12px calc(24px + env(safe-area-inset-bottom)); gap: 12px; }
+      .panel, .card { padding: 12px; }
       main, .panel, .card, .camera, .workspace, .two, .live-workspace, .pairing-layout { min-width: 0; max-width: 100%; }
+      button { min-height: 42px; }
+      input { min-height: 44px; font-size: 16px; }
       .preview-actions button, .camera-action-strip .button-group button { width: 100%; }
       .message, .hint, .notice { overflow-wrap: anywhere; word-break: normal; }
       .preview-actions, .preview-actions .button-group, .camera-action-strip .button-group { width: 100%; }
+      .preview-actions { align-items: stretch; }
+      .preview-actions .button-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .preview-actions .hint { width: 100%; }
       .copy-row { grid-template-columns: minmax(0, 1fr); }
       .form-grid { grid-template-columns: 1fr; }
-      .status-strip { grid-template-columns: 1fr; }
+      .status-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+      .status-item { min-height: 64px; }
+      .status-item .value { font-size: 16px; line-height: 1.15; }
       .setup-focus.active { align-items: stretch; }
       .setup-focus .button-group, .setup-focus .button-group button { width: 100%; }
-      .camera-dialog { width: calc(100vw - 16px); max-height: calc(100vh - 16px); }
+      .camera-dialog { width: 100vw; height: 100dvh; max-width: 100vw; max-height: 100dvh; margin: 0; border: 0; border-radius: 0; }
       .dialog-header, .dialog-footer { padding: 12px; }
+      .dialog-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
+      .dialog-header .hint { display: none; }
       .dialog-body { padding: 12px; }
-      .dialog-footer .button-group { width: 100%; }
-      .dialog-footer .button-group button { flex: 1 1 140px; }
+      .dialog-footer { display: grid; grid-template-columns: 1fr; gap: 8px; padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+      .dialog-footer .button-group { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .dialog-footer .button-group:first-child { grid-template-columns: 1fr; order: 2; }
+      .dialog-footer .button-group:last-child { order: 1; margin-left: 0; }
+      #cancel-camera-edit { grid-column: 1; grid-row: 1; }
+      #test-camera { grid-column: 2; grid-row: 1; }
+      #save { grid-column: 1 / -1; grid-row: 2; }
+      #dialog-footer-status { grid-column: 1 / -1; grid-row: 3; }
+      #dialog-footer-status:empty { display: none; }
+      #cancel-camera-edit:has(~ #test-camera[hidden]) { grid-column: 1 / -1; }
       .camera-grid { grid-template-columns: 1fr; }
-      .camera-tab { flex: 1 1 100%; justify-content: flex-start; }
-      .camera-tab-name { max-width: none; }
+      .camera-tabs { flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-inline: contain; scrollbar-width: thin; padding-bottom: 8px; }
+      .camera-tab { flex: 0 0 auto; max-width: min(78vw, 320px); justify-content: flex-start; }
+      .camera-tab-name { max-width: min(48vw, 210px); }
       .button-group button { flex: 1 1 auto; }
+      .live-header { padding: 12px; }
+      .live-workspace { padding: 10px; gap: 10px; }
+      .preview-placeholder, .preview img, .preview video { min-height: 0; }
       .ptz-actions { grid-template-columns: 1fr; }
       .ptz-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .ptz-grid button { min-height: 48px; }
+      .pairing-primary { padding: 4px 0; }
+      .qr-card img { width: min(220px, 72vw); }
+      .toast { left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); max-width: none; }
+    }
+    @media (max-width: 360px) {
+      header, main { padding-left: 10px; padding-right: 10px; }
+      .panel, .card { padding: 10px; }
+      .status-strip { gap: 6px; }
+      .status-item { min-height: 60px; }
+      .status-item .label { font-size: 9px; }
+      .status-item .value { font-size: 15px; }
+      .pair-code { font-size: 17px; }
+      .camera-tab { max-width: 84vw; }
     }
   </style>
 </head>
